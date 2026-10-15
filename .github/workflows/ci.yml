@@ -18,10 +18,29 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
+      - name: Resolve the version once for this run
+        # One clock reading shared by build and pack, so both packages carry the same stamp (see release.yml).
+        run: |
+          branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          version=$(dotnet msbuild src/Vocab.Sdk/Vocab.Sdk.csproj -getProperty:Version "/p:Branch=${branch}")
+          prefix=${version%%-*}
+          echo "BRANCH=${branch}" >> "$GITHUB_ENV"
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "VERSION_BUILD=$(echo "$prefix" | cut -d. -f3)" >> "$GITHUB_ENV"
+          echo "VERSION_REVISION=$(echo "$prefix" | cut -d. -f4)" >> "$GITHUB_ENV"
+          echo "Building ${version} from ${branch}"
       - run: dotnet restore
-      - run: dotnet build --configuration Release --no-restore
+      - run: dotnet build --configuration Release --no-restore "/p:Branch=${BRANCH}" "/p:VersionBuild=${VERSION_BUILD}" "/p:VersionRevision=${VERSION_REVISION}"
       - run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=results.trx"
-      - run: dotnet pack --configuration Release --no-build --output artifacts
+      - run: dotnet pack --configuration Release --no-build --output artifacts "/p:Branch=${BRANCH}" "/p:VersionBuild=${VERSION_BUILD}" "/p:VersionRevision=${VERSION_REVISION}"
+      - name: Check that every package carries the resolved version
+        run: |
+          for nupkg in artifacts/*.nupkg; do
+            case "$nupkg" in
+              *".${VERSION}.nupkg") echo "ok  $nupkg" ;;
+              *) echo "FAIL $nupkg is not version ${VERSION}"; exit 1 ;;
+            esac
+          done
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: packages

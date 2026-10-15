@@ -48,7 +48,7 @@ A runnable version is in [`samples/Vocab.Samples.Web`](samples/Vocab.Samples.Web
 
 ## Versioning
 
-Semantic versioning. Versions are set by hand in `Directory.Build.props`; a `v*` tag publishes to nuget.org.
+Versions are time based, like every vo.cab package: `0.0.<days since 2020-01-01>.<half-second of day>`, so a newer build is always a higher version. Every merge to `main` publishes a release version to nuget.org after a maintainer approves the deployment; a build from any other branch is a prerelease tagged with the branch name and is published only on demand.
 Until 1.0 the packages ship as previews and the API may change between previews.
 
 ## Building
