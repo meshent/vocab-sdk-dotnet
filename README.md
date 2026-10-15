@@ -48,7 +48,7 @@ A runnable version is in [`samples/Vocab.Samples.Web`](samples/Vocab.Samples.Web
 
 ## Versioning
 
-Versions are time based, like every vo.cab package: `0.0.<days since 2020-01-01>.<half-second of day>`, so a newer build is always a higher version. Every merge to `main` publishes a release version to nuget.org after a maintainer approves the deployment; a build from any other branch is a prerelease tagged with the branch name and is published only on demand.
+Versions are time based, like every vo.cab package: `0.0.<days since 2020-01-01>.<half-second of day>`, so a newer build is always a higher version. The two packages version independently and are published in dependency order, `Vocab.Sdk` first; `Vocab.Sdk.AspNetCore` depends on the newest `Vocab.Sdk` published alongside it. Every merge to `main` publishes release versions to nuget.org after a maintainer approves the deployment; a build from any other branch is a prerelease tagged with the branch name and is published only on demand.
 Until 1.0 the packages ship as previews and the API may change between previews.
 
 ## Building
@@ -57,6 +57,15 @@ Until 1.0 the packages ship as previews and the API may change between previews.
 dotnet build
 dotnet test
 ```
+
+`Vocab.Sdk.AspNetCore` references `Vocab.Sdk` as a published package, so a plain build compiles it against the newest `Vocab.Sdk` on nuget.org. To build and test everything from the working tree instead (needed when you change `Vocab.Sdk` and the code that uses it together):
+
+```bash
+dotnet build -p:UseProjectReferences=true
+dotnet test -p:UseProjectReferences=true
+```
+
+Never pack with that property; the build refuses, because the package would then depend on a `Vocab.Sdk` version that is never published.
 
 ## Licence
 

@@ -1,18 +1,25 @@
 name: release
 
-# Publishes the packages to nuget.org.
+# Publishes the packages to nuget.org, in dependency order.
 #
-# Versions are time based (see Directory.Build.props): every push to main publishes a release version
-# such as 0.0.2479.12345; a manual run from any other branch publishes a prerelease tagged with the branch
-# name, such as 0.0.2479.12345-wip-feature, for trying a change before it merges. The job refuses to
-# publish a release version from anything but main.
+# Versions are time based (see Directory.Build.props): every push to main publishes release versions such as
+# 0.0.2479.12345; a manual run from any other branch publishes prereleases tagged with the branch name, such as
+# 0.0.2479.12345-wip-feature, for trying a change before it merges. The job refuses to publish release versions
+# from anything but main.
+#
+# The packages version independently and are published one after the other: Vocab.Sdk is built, tested and
+# packed first; Vocab.Sdk.AspNetCore then restores against that freshly packed Vocab.Sdk (offered as a local
+# feed next to nuget.org, so its floating Version="*" edge resolves to it rather than to an older published one)
+# and records that exact version as its dependency. Nothing is pushed until both packages have built and
+# tested; the pushes then run in the same order, so a dependency is always on nuget.org before the package
+# that names it.
 #
 # Authentication is NuGet Trusted Publishing: the job presents its GitHub OIDC token to nuget.org and gets a
 # short-lived API key back, so no NuGet credential is stored anywhere. nuget.org needs a Trusted Publishing policy
 # for this repository and this workflow file (owner, repository, `release.yml`, environment `nuget`), and the
-# repository variable NUGET_USER must hold the nuget.org username that owns that policy.
-# The `nuget` environment carries required reviewers, so every publish waits for a person. Actions are pinned to
-# commit SHAs (Dependabot keeps them current). Runs are serialised so two publishes cannot race each other.
+# repository variable NUGET_USER must hold the nuget.org username (not email) of the account that created the
+# policy. The `nuget` environment carries required reviewers, so every publish waits for a person. Actions are
+# pinned to commit SHAs (Dependabot keeps them current). Runs are serialised so two publishes cannot race.
 
 on:
   push:
@@ -25,6 +32,9 @@ permissions:
 concurrency:
   group: release
   cancel-in-progress: false
+
+env:
+  NUGET_ORG: https://api.nuget.org/v3/index.json
 
 jobs:
   publish:
@@ -40,39 +50,51 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
-      - name: Resolve the version for this branch
-        # Evaluated once here and passed to build and pack as properties: every MSBuild evaluation would
-        # otherwise read the clock again, and the two packages (and AspNetCore's dependency on Vocab.Sdk)
-        # could be stamped with different half-seconds.
+      - name: Check the branch may publish this kind of version
         run: |
           echo "BRANCH=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-          version=$(dotnet msbuild src/Vocab.Sdk/Vocab.Sdk.csproj -getProperty:Version "/p:Branch=${GITHUB_REF_NAME}")
-          prefix=${version%%-*}
-          echo "VERSION=${version}" >> "$GITHUB_ENV"
-          echo "VERSION_BUILD=$(echo "$prefix" | cut -d. -f3)" >> "$GITHUB_ENV"
-          echo "VERSION_REVISION=$(echo "$prefix" | cut -d. -f4)" >> "$GITHUB_ENV"
-          echo "Publishing ${version} from ${GITHUB_REF_NAME}"
-          case "$version" in
-            *-*) [ "${GITHUB_REF_NAME}" != "main" ] || { echo "A main build must not carry a prerelease tag"; exit 1; } ;;
-            *)   [ "${GITHUB_REF_NAME}" = "main" ] || { echo "Only main publishes release versions; ${GITHUB_REF_NAME} would publish ${version}"; exit 1; } ;;
-          esac
-      - run: dotnet restore
-      - run: dotnet build --configuration Release --no-restore "/p:Branch=${BRANCH}" "/p:VersionBuild=${VERSION_BUILD}" "/p:VersionRevision=${VERSION_REVISION}"
-      - run: dotnet test --configuration Release --no-build
-      - run: dotnet pack --configuration Release --no-build --output artifacts "/p:Branch=${BRANCH}" "/p:VersionBuild=${VERSION_BUILD}" "/p:VersionRevision=${VERSION_REVISION}"
-      - name: Check that every package carries the resolved version
+          suffix=$(dotnet msbuild src/Vocab.Sdk/Vocab.Sdk.csproj -getProperty:VersionSuffix "/p:Branch=${GITHUB_REF_NAME}")
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            [ -z "$suffix" ] || { echo "A main build must not carry a prerelease tag (got '${suffix}')"; exit 1; }
+            echo "Publishing release versions from main"
+          else
+            [ -n "$suffix" ] || { echo "Only main publishes release versions"; exit 1; }
+            echo "Publishing prerelease versions tagged -${suffix} from ${GITHUB_REF_NAME}"
+          fi
+
+      # 1. Vocab.Sdk: no dependency on a sibling.
+      - run: dotnet restore src/Vocab.Sdk && dotnet restore tests/Vocab.Sdk.Tests
+      - run: dotnet build tests/Vocab.Sdk.Tests --configuration Release --no-restore "/p:Branch=${BRANCH}"
+      - run: dotnet test tests/Vocab.Sdk.Tests --configuration Release --no-build
+      - run: dotnet pack src/Vocab.Sdk --configuration Release --no-build --output artifacts/sdk "/p:Branch=${BRANCH}"
+
+      # 2. Vocab.Sdk.AspNetCore: depends on exactly the Vocab.Sdk just packed (VocabSdkPackageVersion is read by
+      #    MSBuild from the environment), restored from that local feed, so the dependency it records is the
+      #    version pushed in step 3.
+      - name: Point Vocab.Sdk.AspNetCore at the Vocab.Sdk just packed
         run: |
-          for nupkg in artifacts/*.nupkg; do
-            case "$nupkg" in
-              *".${VERSION}.nupkg") echo "ok  $nupkg" ;;
-              *) echo "FAIL $nupkg is not version ${VERSION}"; exit 1 ;;
-            esac
-          done
+          nupkg=$(ls artifacts/sdk/Vocab.Sdk.*.nupkg)
+          version=${nupkg#artifacts/sdk/Vocab.Sdk.}; version=${version%.nupkg}
+          echo "VocabSdkPackageVersion=${version}" >> "$GITHUB_ENV"
+          echo "Vocab.Sdk ${version}"
+      - run: dotnet restore src/Vocab.Sdk.AspNetCore --source artifacts/sdk --source "$NUGET_ORG" && dotnet restore tests/Vocab.Sdk.AspNetCore.Tests --source artifacts/sdk --source "$NUGET_ORG"
+      - run: dotnet build tests/Vocab.Sdk.AspNetCore.Tests --configuration Release --no-restore "/p:Branch=${BRANCH}"
+      - run: dotnet test tests/Vocab.Sdk.AspNetCore.Tests --configuration Release --no-build
+      - run: dotnet pack src/Vocab.Sdk.AspNetCore --configuration Release --no-build --output artifacts/aspnetcore "/p:Branch=${BRANCH}"
+      - name: Show what will be published
+        run: |
+          ls artifacts/sdk/*.nupkg artifacts/aspnetcore/*.nupkg
+          unzip -p artifacts/aspnetcore/*.nupkg '*.nuspec' | grep -i 'dependency id="Vocab.Sdk"' | sort -u
+
+      # 3. Push in dependency order.
       - name: Sign in to nuget.org with the workflow's OIDC token
         id: login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
           user: ${{ vars.NUGET_USER }}
-      - run: dotnet nuget push "artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+      - run: dotnet nuget push "artifacts/sdk/*.nupkg" --source "$NUGET_ORG" --api-key "$NUGET_API_KEY" --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+      - run: dotnet nuget push "artifacts/aspnetcore/*.nupkg" --source "$NUGET_ORG" --api-key "$NUGET_API_KEY" --skip-duplicate
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
