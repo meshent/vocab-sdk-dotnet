@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <UserSecretsId>vocab-samples-web</UserSecretsId>
+    <NoWarn>$(NoWarn);CA1515</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Vocab.Sdk.AspNetCore/Vocab.Sdk.AspNetCore.csproj" />
+  </ItemGroup>
+
+</Project>

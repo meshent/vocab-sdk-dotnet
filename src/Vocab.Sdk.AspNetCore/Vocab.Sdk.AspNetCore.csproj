@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <PackageId>Vocab.Sdk.AspNetCore</PackageId>
+    <Title>Vocab SDK for ASP.NET Core</Title>
+    <Description>Sign in with vo.cab for ASP.NET Core apps and APIs: AddVocab().AddSignIn() wires OpenID Connect with PKCE against auth.vo.cab (cookie session, token refresh, profile claims), AddBearer() validates vo.cab access tokens on your own API, and AddClient() gives you a ready VocabClient for the network API.</Description>
+    <RootNamespace>Vocab.Sdk.AspNetCore</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../Vocab.Sdk/Vocab.Sdk.csproj" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- Minimum versions (NuGet resolves the lowest that satisfies): the current servicing release of each
+       framework's handlers, plus a floor on the IdentityModel libraries above their known advisories. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="8.0.11" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.11" />
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.2.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

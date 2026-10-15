@@ -1,0 +1,38 @@
+name: release
+
+# Publishes the packages to nuget.org when a version tag is pushed (v0.1.0-preview.1, v1.2.0, ...).
+# The tag must match the version in Directory.Build.props; the job refuses otherwise.
+# Runs in the `nuget` environment: give it required reviewers in the repository settings so every publish waits for
+# a person, and keep NUGET_API_KEY (a nuget.org API key scoped to the Vocab.* package ids) as that environment's secret.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: nuget
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Check the tag matches Directory.Build.props
+        run: |
+          prefix=$(sed -n 's:.*<VersionPrefix>\(.*\)</VersionPrefix>.*:\1:p' Directory.Build.props)
+          suffix=$(sed -n 's:.*<VersionSuffix>\(.*\)</VersionSuffix>.*:\1:p' Directory.Build.props)
+          version="$prefix"; [ -n "$suffix" ] && version="$prefix-$suffix"
+          [ "${GITHUB_REF_NAME#v}" = "$version" ] || { echo "Tag ${GITHUB_REF_NAME} does not match version $version"; exit 1; }
+      - run: dotnet restore
+      - run: dotnet build --configuration Release --no-restore
+      - run: dotnet test --configuration Release --no-build
+      - run: dotnet pack --configuration Release --no-build --output artifacts
+      - run: dotnet nuget push "artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

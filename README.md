@@ -29,7 +29,7 @@ app.MapGet("/me", async (VocabClient vocab) => await vocab.WhoAmIAsync()).Requir
 ```
 
 ```json
-{ "Vocab": { "NetworkId": "posili", "ClientId": "<from the Apps pane>", "ClientSecret": "<confidential apps only>" } }
+{ "Vocab": { "NetworkId": "example", "ClientId": "<from the Apps pane>", "ClientSecret": "<confidential apps only>" } }
 ```
 
 Register `https://your-app/signin-vocab` as a redirect URI in your network's Apps pane on vo.cab. A user who signs
@@ -41,8 +41,8 @@ A runnable version is in [`samples/Vocab.Samples.Web`](samples/Vocab.Samples.Web
 
 - Authorization code flow with PKCE (S256), which auth.vo.cab requires of every app.
 - auth.vo.cab's JSON token endpoints, so an off-the-shelf OpenID Connect handler works through `AddSignIn`.
-- Token refresh before expiry, inside the cookie session.
-- The `mn_*` profile claims on `User`, read with `User.GetVocab()`.
+- Token refresh before expiry, inside the cookie session (one refresh however many requests race), and refresh-token revocation at sign-out.
+- The `vo_*` profile claims on `User`, read with `User.GetVocab()`.
 - The network API's error contract as `VocabApiException` with a machine-readable `Code`.
 - Bearer validation on your own API that accepts only tokens minted for *your* app.
 
