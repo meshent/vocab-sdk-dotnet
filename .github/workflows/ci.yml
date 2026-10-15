@@ -19,9 +19,9 @@ jobs:
             8.0.x
             10.0.x
       - run: dotnet restore
-      - run: dotnet build --configuration Release --no-restore
+      - run: dotnet build --configuration Release --no-restore /p:Branch="$GITHUB_HEAD_REF$GITHUB_REF_NAME"
       - run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=results.trx"
-      - run: dotnet pack --configuration Release --no-build --output artifacts
+      - run: dotnet pack --configuration Release --no-build --output artifacts /p:Branch="$GITHUB_HEAD_REF$GITHUB_REF_NAME"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: packages
