@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/Vocab.Samples.Web/Vocab.Samples.Web.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Vocab.Sdk.AspNetCore/Vocab.Sdk.AspNetCore.csproj" />
+    <Project Path="src/Vocab.Sdk/Vocab.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Vocab.Sdk.AspNetCore.Tests/Vocab.Sdk.AspNetCore.Tests.csproj" />
+    <Project Path="tests/Vocab.Sdk.Tests/Vocab.Sdk.Tests.csproj" />
+  </Folder>
+</Solution>
