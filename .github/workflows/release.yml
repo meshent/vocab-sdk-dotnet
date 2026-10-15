@@ -41,19 +41,33 @@ jobs:
             8.0.x
             10.0.x
       - name: Resolve the version for this branch
+        # Evaluated once here and passed to build and pack as properties: every MSBuild evaluation would
+        # otherwise read the clock again, and the two packages (and AspNetCore's dependency on Vocab.Sdk)
+        # could be stamped with different half-seconds.
         run: |
           echo "BRANCH=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
           version=$(dotnet msbuild src/Vocab.Sdk/Vocab.Sdk.csproj -getProperty:Version "/p:Branch=${GITHUB_REF_NAME}")
+          prefix=${version%%-*}
           echo "VERSION=${version}" >> "$GITHUB_ENV"
+          echo "VERSION_BUILD=$(echo "$prefix" | cut -d. -f3)" >> "$GITHUB_ENV"
+          echo "VERSION_REVISION=$(echo "$prefix" | cut -d. -f4)" >> "$GITHUB_ENV"
           echo "Publishing ${version} from ${GITHUB_REF_NAME}"
           case "$version" in
             *-*) [ "${GITHUB_REF_NAME}" != "main" ] || { echo "A main build must not carry a prerelease tag"; exit 1; } ;;
             *)   [ "${GITHUB_REF_NAME}" = "main" ] || { echo "Only main publishes release versions; ${GITHUB_REF_NAME} would publish ${version}"; exit 1; } ;;
           esac
       - run: dotnet restore
-      - run: dotnet build --configuration Release --no-restore "/p:Branch=${BRANCH}"
+      - run: dotnet build --configuration Release --no-restore "/p:Branch=${BRANCH}" "/p:VersionBuild=${VERSION_BUILD}" "/p:VersionRevision=${VERSION_REVISION}"
       - run: dotnet test --configuration Release --no-build
-      - run: dotnet pack --configuration Release --no-build --output artifacts "/p:Branch=${BRANCH}"
+      - run: dotnet pack --configuration Release --no-build --output artifacts "/p:Branch=${BRANCH}" "/p:VersionBuild=${VERSION_BUILD}" "/p:VersionRevision=${VERSION_REVISION}"
+      - name: Check that every package carries the resolved version
+        run: |
+          for nupkg in artifacts/*.nupkg; do
+            case "$nupkg" in
+              *".${VERSION}.nupkg") echo "ok  $nupkg" ;;
+              *) echo "FAIL $nupkg is not version ${VERSION}"; exit 1 ;;
+            esac
+          done
       - name: Sign in to nuget.org with the workflow's OIDC token
         id: login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
