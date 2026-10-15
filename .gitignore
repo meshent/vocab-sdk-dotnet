@@ -1,0 +1,11 @@
+bin/
+obj/
+artifacts/
+*.user
+*.suo
+.vs/
+.idea/
+*.swp
+TestResults/
+*.nupkg
+*.snupkg
