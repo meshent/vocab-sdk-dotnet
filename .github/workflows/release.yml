@@ -2,8 +2,12 @@ name: release
 
 # Publishes the packages to nuget.org when a version tag is pushed (v0.1.0-preview.1, v1.2.0, ...).
 # The tag must match the version in Directory.Build.props; the job refuses otherwise.
-# Runs in the `nuget` environment: give it required reviewers in the repository settings so every publish waits for
-# a person, and keep NUGET_API_KEY (a nuget.org API key scoped to the Vocab.* package ids) as that environment's secret.
+#
+# Authentication is NuGet Trusted Publishing: the job presents its GitHub OIDC token to nuget.org and gets a
+# short-lived API key back, so no NuGet credential is stored anywhere. nuget.org needs a Trusted Publishing policy
+# for this repository and this workflow file (owner, repository, `release.yml`, environment `nuget`), and the
+# repository variable NUGET_USER must hold the nuget.org username that owns that policy.
+# The `nuget` environment carries required reviewers, so every publish waits for a person.
 
 on:
   push:
@@ -16,6 +20,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     environment: nuget
+    permissions:
+      contents: read
+      id-token: write   # lets the job request the OIDC token NuGet/login exchanges for a temporary key
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -33,6 +40,11 @@ jobs:
       - run: dotnet build --configuration Release --no-restore
       - run: dotnet test --configuration Release --no-build
       - run: dotnet pack --configuration Release --no-build --output artifacts
+      - name: Sign in to nuget.org with the workflow's OIDC token
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ vars.NUGET_USER }}
       - run: dotnet nuget push "artifacts/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
