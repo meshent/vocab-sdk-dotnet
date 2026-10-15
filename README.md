@@ -58,7 +58,7 @@ dotnet build
 dotnet test
 ```
 
-`Vocab.Sdk.AspNetCore` references `Vocab.Sdk` as a published package, so a plain build compiles it against the newest `Vocab.Sdk` on nuget.org. To build and test everything from the working tree instead (needed when you change `Vocab.Sdk` and the code that uses it together):
+`Vocab.Sdk.AspNetCore` references `Vocab.Sdk` as a published package, so a plain build compiles it against the newest `Vocab.Sdk` on nuget.org (and fails with NU1101 until the first `Vocab.Sdk` release is published; use the switch below meanwhile). To build and test everything from the working tree instead (needed when you change `Vocab.Sdk` and the code that uses it together):
 
 ```bash
 dotnet build -p:UseProjectReferences=true
