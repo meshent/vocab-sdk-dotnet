@@ -21,7 +21,8 @@ Register `https://your-app/signin-vocab` as the redirect URI in your network's A
 
 Sign out with `SignOutAsync()` (no scheme): the session cookie is cleared and its refresh token revoked at auth.vo.cab.
 Never sign out of the OpenID Connect scheme itself; auth.vo.cab has no end-session endpoint, and the user stays
-signed in to vo.cab, as with any "sign in with" provider. Concurrent requests near token expiry share one refresh.
+signed in to vo.cab, as with any "sign in with" provider. Concurrent requests near token expiry share one refresh within a process; a multi-instance deployment
+without sticky sessions should keep `RefreshBefore` short or route a user's requests to one instance.
 
 For an API that accepts vo.cab access tokens from your mobile or web app, use `.AddBearer()` instead of `.AddSignIn()`;
 it validates the token against auth.vo.cab's keys and refuses tokens minted for any other app.

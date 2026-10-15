@@ -5,6 +5,8 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 using Xunit;
@@ -89,6 +91,63 @@ public class BearerTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, unlabelled.StatusCode);
 
         Assert.Equal(3, messageReceived); // the app's own hook still ran
+    }
+
+    /// <summary>Events supplied the DI way: the handler resolves this type and never reads Options.Events.</summary>
+    public sealed class CountingEvents : JwtBearerEvents
+    {
+        private int _received;
+
+        public int Received => _received;
+
+        public override Task MessageReceived(MessageReceivedContext context)
+        {
+            Interlocked.Increment(ref _received);
+            return base.MessageReceived(context);
+        }
+    }
+
+    [Fact]
+    public async Task The_client_id_check_survives_events_resolved_from_DI_through_EventsType()
+    {
+        await using var app = await TestApp.StartAsync(_authority,
+            v =>
+            {
+                v.Services.AddSingleton<CountingEvents>();
+                return v.AddBearer(jwt =>
+                {
+                    jwt.BackchannelHttpHandler = _authority;
+                    jwt.EventsType = typeof(CountingEvents);
+                });
+            },
+            app => app.MapGet("/api/whoami", (ClaimsPrincipal user) => user.FindFirst(VocabClaims.Subject)!.Value).RequireAuthorization(),
+            clientSecret: null);
+        using var client = app.GetTestClient();
+
+        using var mine = await CallAsync(client, Mint("app"));
+        Assert.Equal(HttpStatusCode.OK, mine.StatusCode);
+
+        using var theirs = await CallAsync(client, Mint("other-app"));
+        Assert.Equal(HttpStatusCode.Unauthorized, theirs.StatusCode);
+
+        Assert.Equal(2, app.Services.GetRequiredService<CountingEvents>().Received);
+    }
+
+    [Fact]
+    public void The_legacy_security_token_validators_path_is_refused_at_startup()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddVocab(o =>
+        {
+            o.NetworkId = "example";
+            o.ClientId = "app";
+        }).AddBearer(jwt => jwt.UseSecurityTokenValidators = true);
+        using var sp = services.BuildServiceProvider();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            sp.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>().Get(VocabDefaults.BearerScheme));
+        Assert.Contains("UseSecurityTokenValidators", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

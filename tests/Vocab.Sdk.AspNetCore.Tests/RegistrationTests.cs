@@ -70,7 +70,8 @@ public class RegistrationTests
         Assert.Equal("https://auth.vo.cab", jwt.Authority);
         Assert.Equal("network.api.vo.cab", jwt.Audience);
         Assert.False(jwt.MapInboundClaims);
-        Assert.NotNull(jwt.Events?.OnTokenValidated);
+        Assert.NotEmpty(jwt.TokenHandlers);
+        Assert.All(jwt.TokenHandlers, handler => Assert.IsType<MintedForThisAppTokenHandler>(handler));
     }
 
     [Fact]

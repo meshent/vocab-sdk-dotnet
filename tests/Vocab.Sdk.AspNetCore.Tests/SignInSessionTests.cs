@@ -88,6 +88,32 @@ public class SignInSessionTests
     }
 
     [Fact]
+    public async Task Signing_out_of_a_session_whose_refresh_is_refused_ends_it_without_looping()
+    {
+        // Authenticate → refresh refused → signed out from inside validation → the endpoint signs out again. The
+        // sign-out hook must not authenticate afresh here, or the two re-enter each other without end.
+        var refreshCalls = 0;
+        var authority = new FakeAuthority()
+            .On(HttpMethod.Post, "/auth/refresh", _ =>
+            {
+                Interlocked.Increment(ref refreshCalls);
+                return (HttpStatusCode.BadRequest, """{"error":"Signed out everywhere.","code":"invalid_grant"}""");
+            })
+            .On(HttpMethod.Post, "/oauth/revoke", _ => (HttpStatusCode.OK, "{}"));
+        await using var app = await TestApp.StartAsync(authority, v => v.AddSignIn(), TestApp.MapSession);
+        using var client = app.GetTestClient();
+        var cookie = await TestApp.SignInAsync(client, expiresIn: 30);
+
+        using var request = TestApp.Request(HttpMethod.Post, "/signout", cookie);
+        using var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(".Vocab.Session=", TestApp.SessionCookie(response));
+        Assert.DoesNotContain(authority.Requests, r => r.Path == "/oauth/revoke");
+        Assert.Equal(1, refreshCalls);
+    }
+
+    [Fact]
     public async Task An_unreachable_authority_keeps_the_current_token_until_next_time()
     {
         var authority = new FakeAuthority()

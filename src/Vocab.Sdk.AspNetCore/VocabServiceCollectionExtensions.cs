@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -132,15 +133,17 @@ public static class VocabServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// Every network app's token carries the same audience, so the <c>client_id</c> check is what keeps another
-    /// app's token out of your API. It runs after <paramref name="configure"/>, whatever that does to
-    /// <see cref="JwtBearerOptions.Events"/>, and cannot be switched off.
+    /// app's token out of your API. It is applied inside token validation itself (<see cref="JwtBearerOptions.TokenHandlers"/>),
+    /// after <paramref name="configure"/> has run, so neither <see cref="JwtBearerOptions.Events"/> nor
+    /// <c>JwtBearerOptions.EventsType</c> can switch it off. The legacy
+    /// <see cref="JwtBearerOptions.UseSecurityTokenValidators"/> path is refused at startup.
     /// </remarks>
     public static IVocabBuilder AddBearer(this IVocabBuilder builder, Action<JwtBearerOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
         builder.Services.AddHttpContextAccessor();
-        // Registered before AddJwtBearer so `configure` runs after it; the client_id check is a PostConfigure and
-        // so wraps whatever OnTokenValidated `configure` left behind, including a replaced Events object.
+        // Registered before AddJwtBearer so `configure` runs after it; the client_id check is a PostConfigure that
+        // wraps the token handlers `configure` left behind, so it is in force whatever `configure` did.
         builder.Services.AddSingleton<IConfigureOptions<JwtBearerOptions>, ConfigureJwtBearer>();
         builder.Services.AddSingleton<IPostConfigureOptions<JwtBearerOptions>, RequireMintedForThisApp>();
         builder.Services.AddAuthentication(VocabDefaults.BearerScheme)
@@ -286,27 +289,33 @@ public static class VocabServiceCollectionExtensions
             // The refresh token is gone (revoked, expired, signed out everywhere): the session is over.
             Logger(services).LogInformation(ex, "The vo.cab session could not be refreshed ({Code}); signing the user out.", ex.Code);
             context.RejectPrincipal();
+            context.HttpContext.Items[SessionEndedKey] = true;
             await context.HttpContext.SignOutAsync(VocabDefaults.CookieScheme);
         }
-        catch (HttpRequestException ex)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            // auth.vo.cab could not be reached. The access token is still valid for a little while, so the request
-            // proceeds on it and the next request tries again.
+            // auth.vo.cab could not be reached, or took too long. The access token is still valid for a little while,
+            // so the request proceeds on it and the next request tries again.
             Logger(services).LogWarning(ex, "auth.vo.cab could not be reached to refresh the session; keeping the current token.");
         }
     }
 
     private static async Task RevokeRefreshTokenAsync(CookieSigningOutContext context)
     {
-        var services = context.HttpContext.RequestServices;
-        var session = await context.HttpContext.AuthenticateAsync(VocabDefaults.CookieScheme);
-        var refreshToken = session.Properties?.GetTokenValue("refresh_token");
+        var http = context.HttpContext;
+        // Signed out by RefreshTokensIfNeededAsync because the refresh token was refused: nothing to revoke, and
+        // authenticating here would re-enter the cookie handler's own authenticate (an infinite loop).
+        if (http.Items.ContainsKey(SessionEndedKey))
+            return;
+
+        var services = http.RequestServices;
+        var refreshToken = await SessionRefreshTokenAsync(http);
         if (string.IsNullOrEmpty(refreshToken))
             return;
 
         try
         {
-            await services.GetRequiredService<VocabAuthClient>().RevokeAsync(refreshToken, context.HttpContext.RequestAborted);
+            await services.GetRequiredService<VocabAuthClient>().RevokeAsync(refreshToken, http.RequestAborted);
         }
         catch (Exception ex) when (ex is VocabApiException or HttpRequestException)
         {
@@ -314,6 +323,19 @@ public static class VocabServiceCollectionExtensions
             Logger(services).LogWarning(ex, "The vo.cab refresh token could not be revoked at sign-out.");
         }
     }
+
+    /// <summary>The session's refresh token: from the result the authentication middleware already produced when it is this cookie's, else a fresh authenticate.</summary>
+    private static async Task<string?> SessionRefreshTokenAsync(HttpContext http)
+    {
+        var authenticated = http.Features.Get<IAuthenticateResultFeature>()?.AuthenticateResult;
+        if (authenticated?.Ticket?.AuthenticationScheme == VocabDefaults.CookieScheme)
+            return authenticated.Properties?.GetTokenValue("refresh_token");
+        var result = await http.AuthenticateAsync(VocabDefaults.CookieScheme);
+        return result.Properties?.GetTokenValue("refresh_token");
+    }
+
+    /// <summary>Set on the request when the session was ended because auth.vo.cab refused its refresh token.</summary>
+    private const string SessionEndedKey = "Vocab.Sdk.SessionEnded";
 
     private static ILogger Logger(IServiceProvider services) =>
         services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(VocabServiceCollectionExtensions));
@@ -347,15 +369,16 @@ public static class VocabServiceCollectionExtensions
         {
             if (name != VocabDefaults.BearerScheme)
                 return;
+            if (options.UseSecurityTokenValidators)
+                throw new InvalidOperationException(
+                    "Vocab.Sdk.AspNetCore validates access tokens through JwtBearerOptions.TokenHandlers; UseSecurityTokenValidators is not supported by AddBearer.");
+            if (options.TokenHandlers.Count == 0)
+                throw new InvalidOperationException("AddBearer needs at least one token handler in JwtBearerOptions.TokenHandlers.");
+
             var clientId = vocab.Value.ClientId;
-            options.Events ??= new JwtBearerEvents();
-            var inner = options.Events.OnTokenValidated;
-            options.Events.OnTokenValidated = async context =>
-            {
-                await inner(context);
-                if (context.Principal is null || !VocabBearerValidation.IsMintedFor(context.Principal, clientId))
-                    context.Fail("The access token was not minted for this app.");
-            };
+            for (var i = 0; i < options.TokenHandlers.Count; i++)
+                if (options.TokenHandlers[i] is not MintedForThisAppTokenHandler)
+                    options.TokenHandlers[i] = new MintedForThisAppTokenHandler(options.TokenHandlers[i], clientId);
         }
     }
 
