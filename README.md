@@ -58,14 +58,13 @@ dotnet build
 dotnet test
 ```
 
-`Vocab.Sdk.AspNetCore` references `Vocab.Sdk` as a published package, so a plain build compiles it against the newest `Vocab.Sdk` on nuget.org (and fails with NU1101 until the first `Vocab.Sdk` release is published; use the switch below meanwhile). To build and test everything from the working tree instead (needed when you change `Vocab.Sdk` and the code that uses it together):
+`Vocab.Sdk.AspNetCore` references `Vocab.Sdk` as a published package, never as a project, so a plain build compiles it against the newest `Vocab.Sdk` on nuget.org. To build it against a `Vocab.Sdk` from your working tree, pack that first and offer it as a local feed, which is what CI does:
 
 ```bash
-dotnet build -p:UseProjectReferences=true
-dotnet test -p:UseProjectReferences=true
+dotnet pack src/Vocab.Sdk --output artifacts/sdk
+VocabSdkPackageVersion=<the version just packed> dotnet restore src/Vocab.Sdk.AspNetCore --source artifacts/sdk --source https://api.nuget.org/v3/index.json
+dotnet build src/Vocab.Sdk.AspNetCore --no-restore
 ```
-
-Never pack with that property; the build refuses, because the package would then depend on a `Vocab.Sdk` version that is never published.
 
 ## Licence
 

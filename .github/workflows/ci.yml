@@ -47,10 +47,6 @@ jobs:
       - name: Show the recorded Vocab.Sdk dependency
         run: unzip -p artifacts/aspnetcore/*.nupkg '*.nuspec' | grep -i 'dependency id="Vocab.Sdk"' | sort -u
 
-      # 3. The whole graph from source, so a Vocab.Sdk change and the code that uses it are tested together
-      - run: dotnet build --configuration Release -p:UseProjectReferences=true "/p:Branch=${BRANCH}"
-      - run: dotnet test --configuration Release --no-build -p:UseProjectReferences=true
-
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: packages
