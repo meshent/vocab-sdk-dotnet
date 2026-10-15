@@ -9,10 +9,12 @@
     build that straddles midnight can never stamp a lower version than an earlier one, and a developer
     machine in another time zone stamps the same number CI would. A build from any branch but main gets the
     branch name as its prerelease tag (`0.0.2479.1234-wip-feature`); main builds are release versions.
-    CI passes the branch as /p:Branch, and evaluates VersionBuild and VersionRevision ONCE per run and passes
-    them as properties too: each MSBuild evaluation reads the clock again, so without that the two packages
-    (and Vocab.Sdk.AspNetCore's dependency on Vocab.Sdk) could be stamped a half-second apart. Never set
-    VersionBuild or VersionRevision by hand to force a version.
+    CI passes the branch as /p:Branch. Never set VersionBuild or VersionRevision by hand to force a version.
+
+    The packages version independently; the numbers carry no meaning beyond ordering. Vocab.Sdk.AspNetCore
+    depends on Vocab.Sdk as a published package (VocabSdkPackageVersion, "*" by default), and the release
+    workflow packs and publishes Vocab.Sdk before Vocab.Sdk.AspNetCore, pointing the dependency at that
+    exact package, so the recorded dependency always names a version that is on nuget.org.
 
     Check an edit by evaluating, not by building:  dotnet msbuild src/Vocab.Sdk/Vocab.Sdk.csproj -getProperty:Version
   -->
@@ -25,6 +27,9 @@
     <VersionBranch Condition=" '$(Branch)' != '' and '$(Branch)' != 'main' ">$([System.String]::Copy('$(Branch)').Replace('/','-').Replace('\','-').Replace('.','-'))</VersionBranch>
     <VersionPrefix>$(VersionMajor).$(VersionMinor).$(VersionBuild).$(VersionRevision)</VersionPrefix>
     <VersionSuffix>$(VersionBranch)</VersionSuffix>
+    <!-- The Vocab.Sdk version Vocab.Sdk.AspNetCore depends on: the newest published release unless CI names
+         the exact package it packed a moment earlier (see release.yml). -->
+    <VocabSdkPackageVersion Condition=" '$(VocabSdkPackageVersion)' == '' ">*</VocabSdkPackageVersion>
   </PropertyGroup>
 
   <PropertyGroup>

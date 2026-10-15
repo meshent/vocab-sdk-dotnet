@@ -1,5 +1,8 @@
 name: ci
 
+# Builds, tests and packs the packages in the same dependency order release.yml publishes them: Vocab.Sdk
+# first, then Vocab.Sdk.AspNetCore against that freshly packed Vocab.Sdk (a local feed beside nuget.org).
+
 on:
   pull_request:
   push:
@@ -7,6 +10,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  NUGET_ORG: https://api.nuget.org/v3/index.json
 
 jobs:
   build:
@@ -18,30 +24,34 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
-      - name: Resolve the version once for this run
-        # One clock reading shared by build and pack, so both packages carry the same stamp (see release.yml).
+      - run: echo "BRANCH=${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+
+      # 1. Vocab.Sdk
+      - run: dotnet restore src/Vocab.Sdk && dotnet restore tests/Vocab.Sdk.Tests
+      - run: dotnet build tests/Vocab.Sdk.Tests --configuration Release --no-restore "/p:Branch=${BRANCH}"
+      - run: dotnet test tests/Vocab.Sdk.Tests --configuration Release --no-build --logger "trx;LogFileName=sdk.trx"
+      - run: dotnet pack src/Vocab.Sdk --configuration Release --no-build --output artifacts/sdk "/p:Branch=${BRANCH}"
+
+      # 2. Vocab.Sdk.AspNetCore, depending on exactly the Vocab.Sdk packed above (MSBuild reads
+      #    VocabSdkPackageVersion from the environment), restored from that local feed
+      - name: Point Vocab.Sdk.AspNetCore at the Vocab.Sdk just packed
         run: |
-          branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
-          version=$(dotnet msbuild src/Vocab.Sdk/Vocab.Sdk.csproj -getProperty:Version "/p:Branch=${branch}")
-          prefix=${version%%-*}
-          echo "BRANCH=${branch}" >> "$GITHUB_ENV"
-          echo "VERSION=${version}" >> "$GITHUB_ENV"
-          echo "VERSION_BUILD=$(echo "$prefix" | cut -d. -f3)" >> "$GITHUB_ENV"
-          echo "VERSION_REVISION=$(echo "$prefix" | cut -d. -f4)" >> "$GITHUB_ENV"
-          echo "Building ${version} from ${branch}"
-      - run: dotnet restore
-      - run: dotnet build --configuration Release --no-restore "/p:Branch=${BRANCH}" "/p:VersionBuild=${VERSION_BUILD}" "/p:VersionRevision=${VERSION_REVISION}"
-      - run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=results.trx"
-      - run: dotnet pack --configuration Release --no-build --output artifacts "/p:Branch=${BRANCH}" "/p:VersionBuild=${VERSION_BUILD}" "/p:VersionRevision=${VERSION_REVISION}"
-      - name: Check that every package carries the resolved version
-        run: |
-          for nupkg in artifacts/*.nupkg; do
-            case "$nupkg" in
-              *".${VERSION}.nupkg") echo "ok  $nupkg" ;;
-              *) echo "FAIL $nupkg is not version ${VERSION}"; exit 1 ;;
-            esac
-          done
+          nupkg=$(ls artifacts/sdk/Vocab.Sdk.*.nupkg)
+          version=${nupkg#artifacts/sdk/Vocab.Sdk.}; version=${version%.nupkg}
+          echo "VocabSdkPackageVersion=${version}" >> "$GITHUB_ENV"
+          echo "Vocab.Sdk ${version}"
+      - run: dotnet restore src/Vocab.Sdk.AspNetCore --source artifacts/sdk --source "$NUGET_ORG" && dotnet restore tests/Vocab.Sdk.AspNetCore.Tests --source artifacts/sdk --source "$NUGET_ORG"
+      - run: dotnet build tests/Vocab.Sdk.AspNetCore.Tests --configuration Release --no-restore "/p:Branch=${BRANCH}"
+      - run: dotnet test tests/Vocab.Sdk.AspNetCore.Tests --configuration Release --no-build --logger "trx;LogFileName=aspnetcore.trx"
+      - run: dotnet pack src/Vocab.Sdk.AspNetCore --configuration Release --no-build --output artifacts/aspnetcore "/p:Branch=${BRANCH}"
+      - name: Show the recorded Vocab.Sdk dependency
+        run: unzip -p artifacts/aspnetcore/*.nupkg '*.nuspec' | grep -i 'dependency id="Vocab.Sdk"' | sort -u
+
+      # 3. The whole graph from source, so a Vocab.Sdk change and the code that uses it are tested together
+      - run: dotnet build --configuration Release -p:UseProjectReferences=true "/p:Branch=${BRANCH}"
+      - run: dotnet test --configuration Release --no-build -p:UseProjectReferences=true
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: packages
-          path: artifacts/*.nupkg
+          path: artifacts/**/*.nupkg
