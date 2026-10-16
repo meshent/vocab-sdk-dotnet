@@ -2,10 +2,12 @@ name: release
 
 # Publishes the packages to nuget.org, in dependency order.
 #
-# Versions are time based (see Directory.Build.props): every push to main publishes release versions such as
-# 0.0.2479.12345; a manual run from any other branch publishes prereleases tagged with the branch name, such as
-# 0.0.2479.12345-wip-feature, for trying a change before it merges. The job refuses to publish release versions
-# from anything but main.
+# Publishing is driven by the `release` branch, not by merges to main, so queued work on main never causes a
+# needless publish: fast-forward main into `release` when a set of changes is ready to ship. Versions are time
+# based (see Directory.Build.props): every push to `release` publishes release versions such as 0.0.2479.12345;
+# a manual run from any other branch publishes prereleases tagged with the branch name, such as
+# 0.0.2479.12345-wip-feature, for trying a change before it ships. The job refuses to publish release versions
+# from anything but `release`.
 #
 # The packages version independently and are published one after the other: Vocab.Sdk is built, tested and
 # packed first; Vocab.Sdk.AspNetCore then restores against that freshly packed Vocab.Sdk (offered as a local
@@ -23,7 +25,7 @@ name: release
 
 on:
   push:
-    branches: [main]
+    branches: [release]
   workflow_dispatch:
 
 permissions:
@@ -54,11 +56,11 @@ jobs:
         run: |
           echo "BRANCH=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
           suffix=$(dotnet msbuild src/Vocab.Sdk/Vocab.Sdk.csproj -getProperty:VersionSuffix "/p:Branch=${GITHUB_REF_NAME}")
-          if [ "${GITHUB_REF_NAME}" = "main" ]; then
-            [ -z "$suffix" ] || { echo "A main build must not carry a prerelease tag (got '${suffix}')"; exit 1; }
-            echo "Publishing release versions from main"
+          if [ "${GITHUB_REF_NAME}" = "release" ]; then
+            [ -z "$suffix" ] || { echo "A release build must not carry a prerelease tag (got '${suffix}')"; exit 1; }
+            echo "Publishing release versions from the release branch"
           else
-            [ -n "$suffix" ] || { echo "Only main publishes release versions"; exit 1; }
+            [ -n "$suffix" ] || { echo "Only the release branch publishes release versions"; exit 1; }
             echo "Publishing prerelease versions tagged -${suffix} from ${GITHUB_REF_NAME}"
           fi
 

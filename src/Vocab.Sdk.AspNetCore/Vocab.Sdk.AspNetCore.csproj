@@ -13,8 +13,8 @@
     <!-- Vocab.Sdk is consumed as a published package, so this package always records a dependency on a
          Vocab.Sdk that exists on nuget.org. VocabSdkPackageVersion defaults to "*" (the newest published
          release, Directory.Build.props); CI sets it to the exact Vocab.Sdk it has just packed and offers that
-         package as a local feed, so the two are built, packed and published in order. For a source-graph build
-         use -p:UseProjectReferences=true (Directory.Build.targets). -->
+         package as a local feed, so the two are built, packed and published in order. Never a ProjectReference:
+         pack would then record a dependency on a version that is never published. -->
     <PackageReference Include="Vocab.Sdk" Version="$(VocabSdkPackageVersion)" />
     <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
