@@ -48,7 +48,7 @@ A runnable version is in [`samples/Vocab.Samples.Web`](samples/Vocab.Samples.Web
 
 ## Versioning
 
-Versions are time based, like every vo.cab package: `0.0.<days since 2020-01-01>.<half-second of day>`, so a newer build is always a higher version. The two packages version independently and are published in dependency order, `Vocab.Sdk` first; `Vocab.Sdk.AspNetCore` depends on the newest `Vocab.Sdk` published alongside it. Publishing is driven by the `release` branch: when a set of changes on `main` is ready to ship, a maintainer fast-forwards `main` into `release`, and that push publishes release versions to nuget.org after a maintainer approves the deployment. Merging to `main` alone publishes nothing. A build from any other branch is a prerelease tagged with the branch name and is published only on demand.
+Versions are time based, like every vo.cab package: `0.0.<days since 2020-01-01>.<half-second of day>`, so a newer build is always a higher version. The two packages version independently and are published in dependency order, `Vocab.Sdk` first; `Vocab.Sdk.AspNetCore` depends on the newest `Vocab.Sdk` published alongside it. Pull requests target the `release` branch. When the work there reaches a stopping point, `release` is merged into `main`, and every push to `main` that passes build and tests publishes release versions to nuget.org, `Vocab.Sdk` first. Nothing in that path is manual. A build from any other branch is a prerelease tagged with the branch name and is published only on demand.
 Until 1.0 the packages ship as previews and the API may change between previews.
 
 ## Building
