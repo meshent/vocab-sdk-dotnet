@@ -53,6 +53,7 @@
     <PackageProjectUrl>https://developers.vo.cab</PackageProjectUrl>
     <RepositoryUrl>https://github.com/meshent/vocab-sdk-dotnet</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>vocab;vo.cab;sdk;oauth;openid-connect;network-app</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
