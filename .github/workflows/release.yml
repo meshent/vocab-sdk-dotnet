@@ -20,8 +20,9 @@ name: release
 # short-lived API key back, so no NuGet credential is stored anywhere. nuget.org needs a Trusted Publishing policy
 # for this repository and this workflow file (owner, repository, `release.yml`, environment `nuget`), and the
 # repository variable NUGET_USER must hold the nuget.org username (not email) of the account that created the
-# policy. The `nuget` environment carries required reviewers, so every publish waits for a person. Actions are
-# pinned to commit SHAs (Dependabot keeps them current). Runs are serialised so two publishes cannot race.
+# policy. The job runs in the `nuget` environment: once that environment has required reviewers configured,
+# every publish waits for a person; without them a push to `release` publishes at once. Actions are pinned to
+# commit SHAs (Dependabot keeps them current). Runs are serialised so two publishes cannot race.
 
 on:
   push:
