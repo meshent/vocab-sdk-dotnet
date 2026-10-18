@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -23,6 +24,11 @@ namespace Vocab.Sdk.Maui;
 /// and the user signs in again.
 /// </para>
 /// <para>
+/// Revocation is per session: auth.vo.cab's <c>/oauth/revoke</c> ends the one session the given refresh token
+/// belongs to, not every grant the user holds for your app. Signing out on one device, or signing in again on
+/// this one (which revokes the session it replaces), leaves the user's other devices signed in.
+/// </para>
+/// <para>
 /// Your app is a public client: it holds no client secret, and auth.vo.cab refuses one. Leave
 /// <see cref="VocabOptions.ClientSecret"/> null.
 /// </para>
@@ -34,10 +40,15 @@ public sealed class VocabSignIn(VocabAuthClient auth, IVocabSessionStore store, 
     // Written only under the gate, in this order (session, then loaded); read without it on the fast paths.
     private volatile VocabSession? _session;
     private volatile bool _loaded;
+    // Counts the session changes, so a change that finished its work late (a slow revoke) does not announce itself
+    // after a later change already has.
+    private int _version;
 
     /// <summary>
-    /// Raised after sign-in, after a refresh, and after sign-out (or a refresh that found the session revoked).
-    /// Handlers run on the calling thread after the SDK's own work for that step is complete.
+    /// Raised once per change of the session in force: after sign-in, after a refresh, and after sign-out (or a
+    /// refresh that found the session revoked), when that change's own work is complete. Changes announce
+    /// themselves in order: a change overtaken by a later one is not announced, so the last event always describes
+    /// the current session. Handlers run on the calling thread.
     /// </summary>
     public event EventHandler<VocabSessionChangedEventArgs>? SessionChanged;
 
@@ -73,8 +84,9 @@ public sealed class VocabSignIn(VocabAuthClient auth, IVocabSessionStore store, 
     /// <exception cref="VocabApiException">auth.vo.cab refused the code.</exception>
     /// <exception cref="OperationCanceledException">The user closed the browser without finishing.</exception>
     /// <remarks>
-    /// A failure to persist the new session is thrown after the session has taken effect in memory: the user is
-    /// signed in for this launch, and the app should treat the exception as a storage problem, not a sign-in failure.
+    /// A failure to persist the new session is thrown after the session has taken effect in memory and been
+    /// announced: the user is signed in for this launch, and the app should treat the exception as a storage
+    /// problem, not a sign-in failure.
     /// </remarks>
     public async Task<VocabSession> SignInAsync(IEnumerable<string>? scopes = null, CancellationToken cancellationToken = default)
     {
@@ -100,28 +112,39 @@ public sealed class VocabSignIn(VocabAuthClient auth, IVocabSessionStore store, 
         var session = VocabSession.From(tokens, time.GetUtcNow());
 
         VocabSession? previous;
+        int version;
+        ExceptionDispatchInfo? storeFailure;
         await _gate.WaitAsync(CancellationToken.None);
         try
         {
             previous = await LoadLockedAsync(CancellationToken.None);
-            await SetSessionLockedAsync(session);
+            version = SwapLocked(session);
+            storeFailure = await TryPersistLockedAsync(session);
         }
         finally
         {
             _gate.Release();
         }
 
-        // The old session's refresh token is no longer reachable from this app, so it may as well die now.
-        if (previous?.RefreshToken is { } old && old != session.RefreshToken)
-            await TryRevokeAsync(old, CancellationToken.None);
+        try
+        {
+            // The old session's refresh token is no longer reachable from this app, so it may as well die now.
+            if (previous?.RefreshToken is { } old && old != session.RefreshToken)
+                await TryRevokeAsync(old, CancellationToken.None);
+        }
+        finally
+        {
+            RaiseSessionChanged(session, version);
+        }
 
-        RaiseSessionChanged(session);
+        storeFailure?.Throw();
         return session;
     }
 
     /// <summary>
     /// The access token to send, refreshed first when it is within <see cref="VocabMauiOptions.RefreshBefore"/> of
-    /// expiring. Null when the user is signed out, or when the session turned out to be revoked (it is then cleared).
+    /// expiring (or within half its lifetime, for a token shorter than twice that window). Null when the user is
+    /// signed out, or when the session turned out to be revoked (it is then cleared).
     /// </summary>
     /// <remarks>
     /// A refresh that fails for a reason other than the session being revoked (the network is down, auth.vo.cab is
@@ -134,10 +157,11 @@ public sealed class VocabSignIn(VocabAuthClient auth, IVocabSessionStore store, 
         var session = await GetSessionAsync(cancellationToken);
         if (session is null)
             return null;
-        if (!session.ExpiresWithin(options.RefreshBefore, time.GetUtcNow()))
+        if (!session.NeedsRefresh(options.RefreshBefore, time.GetUtcNow()))
             return session.AccessToken;
 
         VocabSession? result;
+        int version;
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -147,19 +171,18 @@ public sealed class VocabSignIn(VocabAuthClient auth, IVocabSessionStore store, 
 
             var now = time.GetUtcNow();
             // Another caller refreshed while this one waited at the gate: use what it brought back.
-            if (!current.ExpiresWithin(options.RefreshBefore, now))
+            if (!current.NeedsRefresh(options.RefreshBefore, now))
                 return current.AccessToken;
 
             if (current.RefreshToken is null)
             {
                 if (!current.IsExpired(now))
                     return current.AccessToken;
-                await SetSessionLockedAsync(null);
                 result = null;
             }
             else
             {
-                VocabTokens tokens;
+                VocabTokens? tokens;
                 try
                 {
                     tokens = await auth.RefreshAsync(current.RefreshToken, CancellationToken.None);
@@ -167,40 +190,35 @@ public sealed class VocabSignIn(VocabAuthClient auth, IVocabSessionStore store, 
                 catch (VocabApiException ex) when (ex.Code is VocabErrorCodes.InvalidGrant or VocabErrorCodes.InvalidToken)
                 {
                     // The session is gone on the server (revoked, expired, or its refresh token was reused): sign out locally.
-                    await SetSessionLockedAsync(null);
-                    RaiseSessionChanged(null);
-                    return null;
+                    tokens = null;
                 }
                 catch (Exception ex) when (ex is HttpRequestException or VocabApiException or TaskCanceledException or JsonException && !current.IsExpired(now))
                 {
                     return current.AccessToken;
                 }
 
-                result = VocabSession.From(tokens, now) with
-                {
-                    // auth.vo.cab rotates the refresh token on every refresh; should it ever answer without one, the current token stays valid.
-                    RefreshToken = tokens.RefreshToken ?? current.RefreshToken,
-                    IdToken = tokens.IdToken ?? current.IdToken,
-                    Scope = tokens.Scope ?? current.Scope,
-                };
-                try
-                {
-                    await SetSessionLockedAsync(result);
-                }
-                catch (Exception ex) when (ex is not OutOfMemoryException)
-                {
-                    // The new tokens are in force in memory (SetSessionLockedAsync swaps them in before persisting), so
-                    // nothing can replay the old refresh token; the token asked for is good, and the store is tried
-                    // again at the next change.
-                }
+                result = tokens is null
+                    ? null
+                    : VocabSession.From(tokens, now) with
+                    {
+                        // auth.vo.cab rotates the refresh token on every refresh; should it ever answer without one, the current token stays valid.
+                        RefreshToken = tokens.RefreshToken ?? current.RefreshToken,
+                        IdToken = tokens.IdToken ?? current.IdToken,
+                        Scope = tokens.Scope ?? current.Scope,
+                    };
             }
+
+            version = SwapLocked(result);
+            // A store that fails here changes nothing: the session in force is the one in memory, nothing can replay
+            // the old refresh token, and the store is tried again at the next change.
+            await TryPersistLockedAsync(result);
         }
         finally
         {
             _gate.Release();
         }
 
-        RaiseSessionChanged(result);
+        RaiseSessionChanged(result, version);
         return result?.AccessToken;
     }
 
@@ -214,24 +232,41 @@ public sealed class VocabSignIn(VocabAuthClient auth, IVocabSessionStore store, 
     /// own expiry.
     /// </returns>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled. The app is signed out once the session was forgotten.</exception>
+    /// <remarks>
+    /// A store that fails to forget the session does not stop the revocation: the refresh token is revoked, the
+    /// change announced, and the store's failure then thrown. The next launch finds the stale session, fails to
+    /// refresh it and clears it.
+    /// </remarks>
     public async Task<bool> SignOutAsync(CancellationToken cancellationToken = default)
     {
         VocabSession? session;
+        int version;
+        ExceptionDispatchInfo? storeFailure;
         await _gate.WaitAsync(cancellationToken);
         try
         {
             session = await LoadLockedAsync(cancellationToken);
             if (session is null)
                 return true;
-            await SetSessionLockedAsync(null);
+            version = SwapLocked(null);
+            storeFailure = await TryPersistLockedAsync(null);
         }
         finally
         {
             _gate.Release();
         }
 
-        var revoked = session.RefreshToken is null || await TryRevokeAsync(session.RefreshToken, cancellationToken);
-        RaiseSessionChanged(null);
+        bool revoked;
+        try
+        {
+            revoked = session.RefreshToken is null || await TryRevokeAsync(session.RefreshToken, cancellationToken);
+        }
+        finally
+        {
+            RaiseSessionChanged(null, version);
+        }
+
+        storeFailure?.Throw();
         return revoked;
     }
 
@@ -262,23 +297,42 @@ public sealed class VocabSignIn(VocabAuthClient auth, IVocabSessionStore store, 
         return _session;
     }
 
-    /// <summary>
-    /// Makes <paramref name="session"/> the session in force, in memory first and then in the store. The store is
-    /// written with no cancellation, and a store failure is thrown only after the memory swap, so a token auth.vo.cab
-    /// has already rotated can never be replayed from a stale in-memory session.
-    /// </summary>
-    private async Task SetSessionLockedAsync(VocabSession? session)
+    /// <summary>Makes <paramref name="session"/> the session in force, in memory, and numbers the change.</summary>
+    private int SwapLocked(VocabSession? session)
     {
         _session = session;
         _loaded = true;
-        if (session is null)
-            await store.ClearAsync(CancellationToken.None);
-        else
-            await store.SaveAsync(session, CancellationToken.None);
+        return Interlocked.Increment(ref _version);
     }
 
-    private void RaiseSessionChanged(VocabSession? session) =>
+    /// <summary>
+    /// Writes the session in force to the store, with no cancellation. The memory swap has already happened, so a
+    /// token auth.vo.cab has rotated can never be replayed from a stale in-memory session whatever the store does;
+    /// the store's failure, if any, is returned for the caller to throw once its own work is complete.
+    /// </summary>
+    private async Task<ExceptionDispatchInfo?> TryPersistLockedAsync(VocabSession? session)
+    {
+        try
+        {
+            if (session is null)
+                await store.ClearAsync(CancellationToken.None);
+            else
+                await store.SaveAsync(session, CancellationToken.None);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return ExceptionDispatchInfo.Capture(ex);
+        }
+    }
+
+    private void RaiseSessionChanged(VocabSession? session, int version)
+    {
+        // A later change has already been announced (or is about to be): this one is history.
+        if (Volatile.Read(ref _version) != version)
+            return;
         SessionChanged?.Invoke(this, new VocabSessionChangedEventArgs(session));
+    }
 
     private static string RandomToken() =>
         Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');

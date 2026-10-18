@@ -13,7 +13,10 @@ public sealed class VocabMauiOptions
     /// <summary>The scopes to ask for. Default: <see cref="VocabScopes.Default"/> (sign-in plus basic profile).</summary>
     public IList<string> Scopes { get; } = [.. VocabScopes.Default];
 
-    /// <summary>Refresh the access token when it is this close to expiring, on the next call that needs a token.</summary>
+    /// <summary>
+    /// Refresh the access token when it is this close to expiring, on the next call that needs a token. For a token
+    /// that lives less than twice this long, the window is half its lifetime instead (see <see cref="VocabSession.NeedsRefresh"/>).
+    /// </summary>
     public TimeSpan RefreshBefore { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>

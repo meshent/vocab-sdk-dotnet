@@ -97,6 +97,7 @@ internal sealed class ObservedStore(IVocabSessionStore inner) : IVocabSessionSto
 {
     public List<CancellationToken> SaveTokens { get; } = [];
     public Func<Exception>? FailSaveWith { get; set; }
+    public Func<Exception>? FailClearWith { get; set; }
 
     public Task<VocabSession?> LoadAsync(CancellationToken cancellationToken = default) => inner.LoadAsync(cancellationToken);
 
@@ -108,5 +109,10 @@ internal sealed class ObservedStore(IVocabSessionStore inner) : IVocabSessionSto
         return inner.SaveAsync(session, cancellationToken);
     }
 
-    public Task ClearAsync(CancellationToken cancellationToken = default) => inner.ClearAsync(cancellationToken);
+    public Task ClearAsync(CancellationToken cancellationToken = default)
+    {
+        if (FailClearWith is { } fail)
+            throw fail();
+        return inner.ClearAsync(cancellationToken);
+    }
 }

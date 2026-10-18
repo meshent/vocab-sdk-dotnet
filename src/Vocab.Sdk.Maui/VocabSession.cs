@@ -17,6 +17,10 @@ public sealed record VocabSession
     [JsonPropertyName("expires_at")]
     public required DateTimeOffset ExpiresAt { get; init; }
 
+    /// <summary>When the access token was issued, when known; bounds the refresh window for a short-lived token.</summary>
+    [JsonPropertyName("issued_at")]
+    public DateTimeOffset? IssuedAt { get; init; }
+
     /// <summary>The id token from sign-in, kept as issued. The SDK does not validate it; identity comes from the access token's bearer calls.</summary>
     [JsonPropertyName("id_token")]
     public string? IdToken { get; init; }
@@ -31,6 +35,23 @@ public sealed record VocabSession
     /// <summary>True when the access token has expired at <paramref name="now"/>.</summary>
     public bool IsExpired(DateTimeOffset now) => ExpiresAt <= now;
 
+    /// <summary>
+    /// True when the access token should be refreshed before use: it expires within <paramref name="refreshBefore"/>
+    /// of <paramref name="now"/>, or has already. For a token whose lifetime is shorter than twice that window, the
+    /// window is half the lifetime instead, so a short-lived token is still used for half its life rather than
+    /// refreshed on every call.
+    /// </summary>
+    public bool NeedsRefresh(TimeSpan refreshBefore, DateTimeOffset now) => ExpiresWithin(RefreshWindow(refreshBefore), now);
+
+    /// <summary>The refresh window in force for this token: <paramref name="refreshBefore"/>, capped at half the token's lifetime when that is known.</summary>
+    public TimeSpan RefreshWindow(TimeSpan refreshBefore)
+    {
+        if (IssuedAt is not { } issued || ExpiresAt <= issued)
+            return refreshBefore;
+        var half = (ExpiresAt - issued) / 2;
+        return half < refreshBefore ? half : refreshBefore;
+    }
+
     /// <summary>A session from the tokens auth.vo.cab just issued, stamped against <paramref name="now"/>.</summary>
     public static VocabSession From(VocabTokens tokens, DateTimeOffset now)
     {
@@ -40,6 +61,7 @@ public sealed record VocabSession
             AccessToken = tokens.AccessToken,
             RefreshToken = tokens.RefreshToken,
             ExpiresAt = now.AddSeconds(tokens.ExpiresIn),
+            IssuedAt = now,
             IdToken = tokens.IdToken,
             Scope = tokens.Scope,
         };
