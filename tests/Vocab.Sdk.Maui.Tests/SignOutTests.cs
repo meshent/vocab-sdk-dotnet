@@ -85,4 +85,54 @@ public class SignOutTests
         Assert.Equal(session, await h.Store.LoadAsync());
         Assert.Equal([null, session], h.Changes);
     }
+
+    [Fact]
+    public async Task A_revocation_that_times_out_is_reported_as_false_not_thrown()
+    {
+        var h = new Harness();
+        await h.StoreSessionAsync(TimeSpan.FromHours(1));
+        h.Server.On(HttpMethod.Post, "/oauth/revoke", (_, _) => throw new TaskCanceledException("timed out", new TimeoutException()));
+        using var signIn = h.Build();
+
+        Assert.False(await signIn.SignOutAsync());
+        Assert.Empty(h.Storage.Entries);
+    }
+
+    [Fact]
+    public async Task The_callers_own_cancellation_is_still_thrown()
+    {
+        var h = new Harness();
+        await h.StoreSessionAsync(TimeSpan.FromHours(1));
+        using var cts = new CancellationTokenSource();
+        h.Server.On(HttpMethod.Post, "/oauth/revoke", (_, _) =>
+        {
+            cts.Cancel();
+            throw new TaskCanceledException();
+        });
+        using var signIn = h.Build();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => signIn.SignOutAsync(cts.Token));
+        Assert.Empty(h.Storage.Entries);
+    }
+
+    [Fact]
+    public async Task A_throwing_session_changed_handler_does_not_skip_the_revocation()
+    {
+        var h = new Harness();
+        await h.StoreSessionAsync(TimeSpan.FromHours(1));
+        var revoked = false;
+        h.Server.On(HttpMethod.Post, "/oauth/revoke", _ =>
+        {
+            revoked = true;
+            return (HttpStatusCode.OK, "{}");
+        });
+        using var signIn = h.Build();
+        signIn.SessionChanged += (_, _) => throw new InvalidOperationException("ui gone");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => signIn.SignOutAsync());
+
+        Assert.True(revoked);
+        Assert.Empty(h.Storage.Entries);
+        Assert.Null(await signIn.GetSessionAsync());
+    }
 }

@@ -165,4 +165,54 @@ public class SignInTests
         Assert.Equal("a1", await signIn.GetAccessTokenAsync());
         Assert.Empty(h.Server.Requests);
     }
+
+    [Fact]
+    public async Task A_sign_in_the_store_cannot_persist_throws_but_stands_in_memory_for_this_launch()
+    {
+        var h = new Harness();
+        h.Server.On(HttpMethod.Post, "/oauth/token", _ => (HttpStatusCode.OK, Harness.Tokens("a1", "r1")));
+        using var signIn = h.Build();
+        h.Observed.FailSaveWith = () => new InvalidOperationException("the keystore is unavailable");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => signIn.SignInAsync());
+
+        Assert.Equal("a1", (await signIn.GetSessionAsync())!.AccessToken);
+        Assert.Equal("a1", await signIn.GetAccessTokenAsync());
+        Assert.Empty(h.Storage.Entries);
+    }
+
+    [Fact]
+    public async Task Signing_in_over_an_existing_session_replaces_it_and_revokes_the_old_refresh_token()
+    {
+        var h = new Harness();
+        await h.StoreSessionAsync(TimeSpan.FromHours(1));
+        h.Server.On(HttpMethod.Post, "/oauth/token", _ => (HttpStatusCode.OK, Harness.Tokens("a9", "r9")));
+        string? revokeBody = null;
+        h.Server.On(HttpMethod.Post, "/oauth/revoke", body =>
+        {
+            revokeBody = body;
+            return (HttpStatusCode.OK, "{}");
+        });
+        using var signIn = h.Build();
+
+        var session = await signIn.SignInAsync();
+
+        Assert.Equal("token=r1", revokeBody);
+        Assert.Equal("r9", session.RefreshToken);
+        Assert.Equal(session, await h.Store.LoadAsync());
+        Assert.Equal([session], h.Changes);
+    }
+
+    [Fact]
+    public async Task The_old_refresh_token_failing_to_revoke_does_not_fail_the_new_sign_in()
+    {
+        var h = new Harness();
+        await h.StoreSessionAsync(TimeSpan.FromHours(1));
+        h.Server.On(HttpMethod.Post, "/oauth/token", _ => (HttpStatusCode.OK, Harness.Tokens("a9", "r9")));
+        h.Server.On(HttpMethod.Post, "/oauth/revoke", (_, _) => throw new HttpRequestException("offline"));
+        using var signIn = h.Build();
+
+        Assert.Equal("a9", (await signIn.SignInAsync()).AccessToken);
+        Assert.Equal("a9", await signIn.GetAccessTokenAsync());
+    }
 }

@@ -206,4 +206,64 @@ public class RefreshTests
         Assert.Null(await signIn.GetAccessTokenAsync());
         Assert.Empty(h.Server.Requests);
     }
+
+    [Fact]
+    public async Task New_tokens_the_store_cannot_persist_take_effect_in_memory_so_the_old_refresh_token_is_never_replayed()
+    {
+        var h = new Harness();
+        await h.StoreSessionAsync(TimeSpan.FromSeconds(30));
+        var refreshed = new List<string>();
+        h.Server.On(HttpMethod.Post, "/auth/refresh", body =>
+        {
+            refreshed.Add(JsonSerializer.Deserialize<Dictionary<string, string>>(body!)!["refresh_token"]);
+            return (HttpStatusCode.OK, Harness.Tokens("a2", "r2"));
+        });
+        using var signIn = h.Build();
+        h.Observed.FailSaveWith = () => new InvalidOperationException("the keystore is unavailable");
+
+        Assert.Equal("a2", await signIn.GetAccessTokenAsync());
+        Assert.Equal("a2", await signIn.GetAccessTokenAsync());
+        h.Clock.Now += TimeSpan.FromMinutes(30);
+        Assert.Equal("a2", await signIn.GetAccessTokenAsync());
+
+        Assert.Equal(["r1"], refreshed);
+        Assert.Equal("r2", (await signIn.GetSessionAsync())!.RefreshToken);
+        Assert.Equal("r1", (await h.Store.LoadAsync())!.RefreshToken);
+        Assert.Single(h.Changes);
+    }
+
+    [Fact]
+    public async Task The_store_is_written_without_the_callers_cancellation_token_so_a_cancelled_caller_cannot_lose_rotated_tokens()
+    {
+        var h = new Harness();
+        await h.StoreSessionAsync(TimeSpan.FromSeconds(30));
+        using var cts = new CancellationTokenSource();
+        var refreshed = new List<string>();
+        h.Server.On(HttpMethod.Post, "/auth/refresh", body =>
+        {
+            refreshed.Add(JsonSerializer.Deserialize<Dictionary<string, string>>(body!)!["refresh_token"]);
+            cts.Cancel(); // the caller gives up while the server is already rotating
+            return (HttpStatusCode.OK, Harness.Tokens("a2", "r2"));
+        });
+        using var signIn = h.Build();
+
+        Assert.Equal("a2", await signIn.GetAccessTokenAsync(cts.Token));
+        Assert.Equal("a2", await signIn.GetAccessTokenAsync());
+
+        Assert.Equal(["r1"], refreshed);
+        Assert.All(h.Observed.SaveTokens, t => Assert.False(t.CanBeCanceled));
+        Assert.Equal("r2", (await h.Store.LoadAsync())!.RefreshToken);
+    }
+
+    [Fact]
+    public async Task A_malformed_success_answer_is_not_a_sign_out_while_the_token_is_valid()
+    {
+        var h = new Harness();
+        await h.StoreSessionAsync(TimeSpan.FromSeconds(30));
+        h.Server.On(HttpMethod.Post, "/auth/refresh", _ => (HttpStatusCode.OK, "<html>not json</html>"));
+        using var signIn = h.Build();
+
+        Assert.Equal("a1", await signIn.GetAccessTokenAsync());
+        Assert.Equal("r1", (await h.Store.LoadAsync())!.RefreshToken);
+    }
 }

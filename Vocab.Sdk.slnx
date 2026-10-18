@@ -1,6 +1,5 @@
 <Solution>
   <Folder Name="/samples/">
-    <Project Path="samples/Vocab.Samples.Maui/Vocab.Samples.Maui.csproj" />
     <Project Path="samples/Vocab.Samples.Web/Vocab.Samples.Web.csproj" />
   </Folder>
   <Folder Name="/src/">

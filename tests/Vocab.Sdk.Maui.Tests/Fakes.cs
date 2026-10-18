@@ -63,13 +63,17 @@ internal sealed class Harness
     public FakeAuthenticator Authenticator { get; set; } = FakeAuthenticator.Succeeding();
     public List<VocabSession?> Changes { get; } = [];
 
+    /// <summary>Wraps the real store so a test can watch, or break, its writes.</summary>
+    public ObservedStore Observed { get; private set; } = null!;
+
     public VocabAuthClient Auth => new(new HttpClient(Server) { BaseAddress = Authority }, Options);
 
     public SecureStorageSessionStore Store => new(Storage, SignInOptions);
 
     public VocabSignIn Build()
     {
-        var signIn = new VocabSignIn(Auth, Store, Authenticator, SignInOptions, Clock);
+        Observed = new ObservedStore(Store);
+        var signIn = new VocabSignIn(Auth, Observed, Authenticator, SignInOptions, Clock);
         signIn.SessionChanged += (_, e) => Changes.Add(e.Session);
         return signIn;
     }
@@ -86,4 +90,23 @@ internal sealed class Harness
         refresh is null
             ? $$$"""{"access_token":"{{{access}}}","token_type":"Bearer","expires_in":{{{expiresIn}}}}"""
             : $$$"""{"access_token":"{{{access}}}","token_type":"Bearer","expires_in":{{{expiresIn}}},"refresh_token":"{{{refresh}}}"}""";
+}
+
+/// <summary>A store that records the cancellation tokens it is given and fails when told to.</summary>
+internal sealed class ObservedStore(IVocabSessionStore inner) : IVocabSessionStore
+{
+    public List<CancellationToken> SaveTokens { get; } = [];
+    public Func<Exception>? FailSaveWith { get; set; }
+
+    public Task<VocabSession?> LoadAsync(CancellationToken cancellationToken = default) => inner.LoadAsync(cancellationToken);
+
+    public Task SaveAsync(VocabSession session, CancellationToken cancellationToken = default)
+    {
+        SaveTokens.Add(cancellationToken);
+        if (FailSaveWith is { } fail)
+            throw fail();
+        return inner.SaveAsync(session, cancellationToken);
+    }
+
+    public Task ClearAsync(CancellationToken cancellationToken = default) => inner.ClearAsync(cancellationToken);
 }

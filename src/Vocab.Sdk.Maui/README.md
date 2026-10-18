@@ -29,7 +29,7 @@ What the package does for you:
 
 - Authorization code flow with PKCE (S256) through the system browser (`WebAuthenticator`), with a `state` check on the way back.
 - The session (access, refresh and id tokens) in `SecureStorage`, so the user stays signed in across launches.
-- A fresh access token for every `VocabClient` call: tokens are refreshed before they expire, once per expiry window however many calls race, because auth.vo.cab rotates refresh tokens and revokes a session whose refresh token is used twice.
+- A fresh access token for every `VocabClient` call: tokens are refreshed before they expire, with one refresh however many calls race and the new tokens in force before they are persisted, because auth.vo.cab rotates refresh tokens and revokes a session whose refresh token is used twice.
 - Sign-out that revokes the refresh token at auth.vo.cab and forgets the session. There is no end-session endpoint; the user stays signed in to vo.cab itself.
 - `SessionChanged` for your UI, and `IVocabSessionStore` / `IVocabAuthenticator` to substitute in tests.
 

@@ -47,10 +47,14 @@ public static class VocabMauiServiceCollectionExtensions
         services.TryAddSingleton<IVocabSessionStore, SecureStorageSessionStore>();
         services.TryAddSingleton<IVocabAuthenticator, WebAuthenticatorVocabAuthenticator>();
 #pragma warning disable CA2000 // The HttpClients live as long as the singletons that own them: the app's lifetime.
-        services.TryAddSingleton(sp => new VocabAuthClient(new HttpClient { BaseAddress = options.Authority }, sp.GetRequiredService<VocabOptions>()));
+        services.TryAddSingleton(sp =>
+        {
+            var registered = sp.GetRequiredService<VocabOptions>();
+            return new VocabAuthClient(new HttpClient { BaseAddress = registered.Authority }, registered);
+        });
         services.TryAddSingleton<VocabSignIn>();
         services.TryAddSingleton<IVocabTokenProvider>(sp => sp.GetRequiredService<VocabSignIn>());
-        services.TryAddSingleton(sp => new VocabClient(new HttpClient { BaseAddress = options.ApiBaseAddress }, sp.GetRequiredService<IVocabTokenProvider>()));
+        services.TryAddSingleton(sp => new VocabClient(new HttpClient { BaseAddress = sp.GetRequiredService<VocabOptions>().ApiBaseAddress }, sp.GetRequiredService<IVocabTokenProvider>()));
 #pragma warning restore CA2000
         return services;
     }

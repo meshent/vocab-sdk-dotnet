@@ -9,6 +9,7 @@ on:
     paths:
       - samples/Vocab.Samples.Maui/**
       - src/Vocab.Sdk.Maui/**
+      - Directory.Build.props
       - .github/workflows/sample-maui.yml
   workflow_dispatch:
 

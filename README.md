@@ -93,7 +93,8 @@ dotnet build src/Vocab.Sdk.AspNetCore --no-restore
 ```
 
 `Vocab.Sdk.Maui` targets plain `net8.0`/`net10.0` and needs no MAUI workload to build or test. The MAUI sample app
-does: `dotnet workload install maui-android` (plus an Android SDK), or the iOS and Mac Catalyst workloads on a Mac.
+does, so it is not in the solution: build it on its own with `dotnet build samples/Vocab.Samples.Maui -f net10.0-android`
+after `dotnet workload install maui-android` (plus an Android SDK), or with the iOS and Mac Catalyst workloads on a Mac.
 
 ## Licence
 
