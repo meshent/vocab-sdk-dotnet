@@ -1,0 +1,30 @@
+name: sample-maui
+
+# Builds the .NET MAUI sample for Android, which needs the MAUI workload and an Android SDK that ci.yml does not
+# install (the packages themselves need neither). It runs only when the sample or the MAUI package changes, to
+# keep the runner bill down, and on demand.
+
+on:
+  pull_request:
+    paths:
+      - samples/Vocab.Samples.Maui/**
+      - src/Vocab.Sdk.Maui/**
+      - .github/workflows/sample-maui.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet workload install maui-android
+      # The hosted runner ships an Android SDK and JDK 17; the first build step adds the platform the sample targets.
+      - name: Install the Android SDK pieces the sample targets
+        run: dotnet build samples/Vocab.Samples.Maui -f net10.0-android -t:InstallAndroidDependencies "-p:AndroidSdkDirectory=${ANDROID_HOME}" "-p:JavaSdkDirectory=${JAVA_HOME_17_X64}" -p:AcceptAndroidSDKLicenses=true
+      - run: dotnet build samples/Vocab.Samples.Maui -f net10.0-android --configuration Release "-p:AndroidSdkDirectory=${ANDROID_HOME}" "-p:JavaSdkDirectory=${JAVA_HOME_17_X64}"

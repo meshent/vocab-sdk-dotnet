@@ -9,11 +9,11 @@ name: release
 # trying a change before it ships. The job refuses to publish release versions from anything but main.
 #
 # The packages version independently and are published one after the other: Vocab.Sdk is built, tested and
-# packed first; Vocab.Sdk.AspNetCore then restores against that freshly packed Vocab.Sdk (offered as a local
-# feed next to nuget.org, so its floating Version="*" edge resolves to it rather than to an older published one)
-# and records that exact version as its dependency. Nothing is pushed until both packages have built and
-# tested; the pushes then run in the same order, so a dependency is always on nuget.org before the package
-# that names it.
+# packed first; Vocab.Sdk.AspNetCore and Vocab.Sdk.Maui then restore against that freshly packed Vocab.Sdk
+# (offered as a local feed next to nuget.org, so their floating Version="*" edge resolves to it rather than to an
+# older published one) and record that exact version as their dependency. Nothing is pushed until all three
+# packages have built and tested; the pushes then run in the same order, so a dependency is always on nuget.org
+# before the package that names it. Vocab.Sdk.Maui targets plain net8.0/net10.0, so no MAUI workload is needed here.
 #
 # Authentication is NuGet Trusted Publishing: the job presents its GitHub OIDC token to nuget.org and gets a
 # short-lived API key back, so no NuGet credential is stored anywhere. nuget.org needs a Trusted Publishing policy
@@ -70,10 +70,10 @@ jobs:
       - run: dotnet test tests/Vocab.Sdk.Tests --configuration Release --no-build
       - run: dotnet pack src/Vocab.Sdk --configuration Release --no-build --output artifacts/sdk "/p:Branch=${BRANCH}"
 
-      # 2. Vocab.Sdk.AspNetCore: depends on exactly the Vocab.Sdk just packed (VocabSdkPackageVersion is read by
-      #    MSBuild from the environment), restored from that local feed, so the dependency it records is the
-      #    version pushed in step 3.
-      - name: Point Vocab.Sdk.AspNetCore at the Vocab.Sdk just packed
+      # 2. Vocab.Sdk.AspNetCore and Vocab.Sdk.Maui: depend on exactly the Vocab.Sdk just packed (VocabSdkPackageVersion
+      #    is read by MSBuild from the environment), restored from that local feed, so the dependency they record is
+      #    the version pushed in step 3.
+      - name: Point the platform packages at the Vocab.Sdk just packed
         run: |
           nupkg=$(ls artifacts/sdk/Vocab.Sdk.*.nupkg)
           version=${nupkg#artifacts/sdk/Vocab.Sdk.}; version=${version%.nupkg}
@@ -83,10 +83,16 @@ jobs:
       - run: dotnet build tests/Vocab.Sdk.AspNetCore.Tests --configuration Release --no-restore "/p:Branch=${BRANCH}"
       - run: dotnet test tests/Vocab.Sdk.AspNetCore.Tests --configuration Release --no-build
       - run: dotnet pack src/Vocab.Sdk.AspNetCore --configuration Release --no-build --output artifacts/aspnetcore "/p:Branch=${BRANCH}"
+      - run: dotnet restore src/Vocab.Sdk.Maui --source artifacts/sdk --source "$NUGET_ORG" && dotnet restore tests/Vocab.Sdk.Maui.Tests --source artifacts/sdk --source "$NUGET_ORG"
+      - run: dotnet build tests/Vocab.Sdk.Maui.Tests --configuration Release --no-restore "/p:Branch=${BRANCH}"
+      - run: dotnet test tests/Vocab.Sdk.Maui.Tests --configuration Release --no-build
+      - run: dotnet pack src/Vocab.Sdk.Maui --configuration Release --no-build --output artifacts/maui "/p:Branch=${BRANCH}"
       - name: Show what will be published
         run: |
-          ls artifacts/sdk/*.nupkg artifacts/aspnetcore/*.nupkg
-          unzip -p artifacts/aspnetcore/*.nupkg '*.nuspec' | grep -i 'dependency id="Vocab.Sdk"' | sort -u
+          ls artifacts/sdk/*.nupkg artifacts/aspnetcore/*.nupkg artifacts/maui/*.nupkg
+          for pkg in artifacts/aspnetcore/*.nupkg artifacts/maui/*.nupkg; do
+            echo "$pkg"; unzip -p "$pkg" '*.nuspec' | grep -i 'dependency id="Vocab.Sdk"' | sort -u
+          done
 
       # 3. Push in dependency order.
       - name: Sign in to nuget.org with the workflow's OIDC token
@@ -98,5 +104,8 @@ jobs:
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
       - run: dotnet nuget push "artifacts/aspnetcore/*.nupkg" --source "$NUGET_ORG" --api-key "$NUGET_API_KEY" --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+      - run: dotnet nuget push "artifacts/maui/*.nupkg" --source "$NUGET_ORG" --api-key "$NUGET_API_KEY" --skip-duplicate
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}

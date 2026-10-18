@@ -7,7 +7,7 @@ Three packages, one repository:
 |---|---|
 | `Vocab.Sdk` | The core client: token exchange and refresh against `auth.vo.cab`, and the network API over `https://{network}.api.vo.cab`. Works in any .NET app. |
 | `Vocab.Sdk.AspNetCore` | Sign in with vo.cab for ASP.NET Core apps (`AddSignIn`), vo.cab bearer tokens on your own API (`AddBearer`), and a ready `VocabClient` (`AddClient`). |
-| `Vocab.Sdk.Maui` | Sign in from a .NET MAUI app with a private-use redirect and a secure token store. Coming next. |
+| `Vocab.Sdk.Maui` | Sign in from a .NET MAUI app (`AddVocab`): the system browser with PKCE and a private-use redirect, the session in `SecureStorage`, refresh before expiry, sign-out by revocation, and a ready `VocabClient`. |
 
 Documentation, quickstarts and the API reference live at **https://developers.vo.cab**.
 
@@ -37,18 +37,44 @@ in without a profile in your network is offered one by auth.vo.cab before they c
 
 A runnable version is in [`samples/Vocab.Samples.Web`](samples/Vocab.Samples.Web).
 
+## Quickstart (.NET MAUI)
+
+```bash
+dotnet add package Vocab.Sdk.Maui --prerelease
+```
+
+```csharp
+builder.Services.AddVocab(
+    vocab =>
+    {
+        vocab.NetworkId = "example";
+        vocab.ClientId = "<from the Apps pane>";   // a public client: no secret
+    },
+    signIn => signIn.RedirectUri = "myapp://callback");
+```
+
+```csharp
+await signIn.SignInAsync();                 // VocabSignIn: system browser, PKCE, session into SecureStorage
+var me = await vocab.WhoAmIAsync();         // VocabClient: a fresh token on every call
+await signIn.SignOutAsync();                // revokes the refresh token and forgets the session
+```
+
+Register `myapp://callback` as a redirect URI in the Apps pane and declare the `myapp` scheme to each platform
+(an intent filter on Android, `CFBundleURLTypes` on iOS and Mac Catalyst). A runnable version is in
+[`samples/Vocab.Samples.Maui`](samples/Vocab.Samples.Maui).
+
 ## What the SDK takes care of
 
 - Authorization code flow with PKCE (S256), which auth.vo.cab requires of every app.
 - auth.vo.cab's JSON token endpoints, so an off-the-shelf OpenID Connect handler works through `AddSignIn`.
-- Token refresh before expiry, inside the cookie session (one refresh however many requests race), and refresh-token revocation at sign-out.
+- Token refresh before expiry, inside the cookie session or the device's secure storage (one refresh however many requests race), and refresh-token revocation at sign-out.
 - The `vo_*` profile claims on `User`, read with `User.GetVocab()`.
 - The network API's error contract as `VocabApiException` with a machine-readable `Code`.
 - Bearer validation on your own API that accepts only tokens minted for *your* app.
 
 ## Versioning
 
-Versions are time based, like every vo.cab package: `0.0.<days since 2020-01-01>.<half-second of day>`, so a newer build is always a higher version. The two packages version independently and are published in dependency order, `Vocab.Sdk` first; `Vocab.Sdk.AspNetCore` depends on the newest `Vocab.Sdk` published alongside it. Pull requests target the `release` branch. When the work there reaches a stopping point, `release` is merged into `main`, and every push to `main` that passes build and tests publishes release versions to nuget.org, `Vocab.Sdk` first. Nothing in that path is manual. A build from any other branch is a prerelease tagged with the branch name and is published only on demand.
+Versions are time based, like every vo.cab package: `0.0.<days since 2020-01-01>.<half-second of day>`, so a newer build is always a higher version. The packages version independently and are published in dependency order, `Vocab.Sdk` first; `Vocab.Sdk.AspNetCore` and `Vocab.Sdk.Maui` depend on the newest `Vocab.Sdk` published alongside them. Pull requests target the `release` branch. When the work there reaches a stopping point, `release` is merged into `main`, and every push to `main` that passes build and tests publishes release versions to nuget.org, `Vocab.Sdk` first. Nothing in that path is manual. A build from any other branch is a prerelease tagged with the branch name and is published only on demand.
 Until 1.0 the packages ship as previews and the API may change between previews.
 
 ## Building
@@ -58,13 +84,16 @@ dotnet build
 dotnet test
 ```
 
-`Vocab.Sdk.AspNetCore` references `Vocab.Sdk` as a published package, never as a project, so a plain build compiles it against the newest `Vocab.Sdk` on nuget.org. To build it against a `Vocab.Sdk` from your working tree, pack that first and offer it as a local feed, which is what CI does:
+`Vocab.Sdk.AspNetCore` and `Vocab.Sdk.Maui` reference `Vocab.Sdk` as a published package, never as a project, so a plain build compiles them against the newest `Vocab.Sdk` on nuget.org. To build them against a `Vocab.Sdk` from your working tree, pack that first and offer it as a local feed, which is what CI does:
 
 ```bash
 dotnet pack src/Vocab.Sdk --output artifacts/sdk
 VocabSdkPackageVersion=<the version just packed> dotnet restore src/Vocab.Sdk.AspNetCore --source artifacts/sdk --source https://api.nuget.org/v3/index.json
 dotnet build src/Vocab.Sdk.AspNetCore --no-restore
 ```
+
+`Vocab.Sdk.Maui` targets plain `net8.0`/`net10.0` and needs no MAUI workload to build or test. The MAUI sample app
+does: `dotnet workload install maui-android` (plus an Android SDK), or the iOS and Mac Catalyst workloads on a Mac.
 
 ## Licence
 

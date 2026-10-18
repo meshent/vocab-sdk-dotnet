@@ -1,7 +1,10 @@
 name: ci
 
 # Builds, tests and packs the packages in the same dependency order release.yml publishes them: Vocab.Sdk
-# first, then Vocab.Sdk.AspNetCore against that freshly packed Vocab.Sdk (a local feed beside nuget.org).
+# first, then Vocab.Sdk.AspNetCore and Vocab.Sdk.Maui against that freshly packed Vocab.Sdk (a local feed beside
+# nuget.org). None of this needs the MAUI workload: Vocab.Sdk.Maui targets plain net8.0/net10.0 and binds to the
+# app's Microsoft.Maui.Essentials at run time. The MAUI sample app, which does need the workload (and an Android
+# SDK), is built by sample-maui.yml only when it or the package changes.
 
 on:
   pull_request:
@@ -32,9 +35,9 @@ jobs:
       - run: dotnet test tests/Vocab.Sdk.Tests --configuration Release --no-build --logger "trx;LogFileName=sdk.trx"
       - run: dotnet pack src/Vocab.Sdk --configuration Release --no-build --output artifacts/sdk "/p:Branch=${BRANCH}"
 
-      # 2. Vocab.Sdk.AspNetCore, depending on exactly the Vocab.Sdk packed above (MSBuild reads
+      # 2. Vocab.Sdk.AspNetCore and Vocab.Sdk.Maui, depending on exactly the Vocab.Sdk packed above (MSBuild reads
       #    VocabSdkPackageVersion from the environment), restored from that local feed
-      - name: Point Vocab.Sdk.AspNetCore at the Vocab.Sdk just packed
+      - name: Point the platform packages at the Vocab.Sdk just packed
         run: |
           nupkg=$(ls artifacts/sdk/Vocab.Sdk.*.nupkg)
           version=${nupkg#artifacts/sdk/Vocab.Sdk.}; version=${version%.nupkg}
@@ -44,8 +47,15 @@ jobs:
       - run: dotnet build tests/Vocab.Sdk.AspNetCore.Tests --configuration Release --no-restore "/p:Branch=${BRANCH}"
       - run: dotnet test tests/Vocab.Sdk.AspNetCore.Tests --configuration Release --no-build --logger "trx;LogFileName=aspnetcore.trx"
       - run: dotnet pack src/Vocab.Sdk.AspNetCore --configuration Release --no-build --output artifacts/aspnetcore "/p:Branch=${BRANCH}"
-      - name: Show the recorded Vocab.Sdk dependency
-        run: unzip -p artifacts/aspnetcore/*.nupkg '*.nuspec' | grep -i 'dependency id="Vocab.Sdk"' | sort -u
+      - run: dotnet restore src/Vocab.Sdk.Maui --source artifacts/sdk --source "$NUGET_ORG" && dotnet restore tests/Vocab.Sdk.Maui.Tests --source artifacts/sdk --source "$NUGET_ORG"
+      - run: dotnet build tests/Vocab.Sdk.Maui.Tests --configuration Release --no-restore "/p:Branch=${BRANCH}"
+      - run: dotnet test tests/Vocab.Sdk.Maui.Tests --configuration Release --no-build --logger "trx;LogFileName=maui.trx"
+      - run: dotnet pack src/Vocab.Sdk.Maui --configuration Release --no-build --output artifacts/maui "/p:Branch=${BRANCH}"
+      - name: Show the recorded Vocab.Sdk dependencies
+        run: |
+          for pkg in artifacts/aspnetcore/*.nupkg artifacts/maui/*.nupkg; do
+            echo "$pkg"; unzip -p "$pkg" '*.nuspec' | grep -i 'dependency id="Vocab.Sdk"' | sort -u
+          done
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
