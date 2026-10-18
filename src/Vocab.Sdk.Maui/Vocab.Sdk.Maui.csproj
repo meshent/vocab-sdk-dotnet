@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <PackageId>Vocab.Sdk.Maui</PackageId>
+    <Title>Vocab SDK for .NET MAUI</Title>
+    <Description>Sign in with vo.cab from a .NET MAUI app: AddVocab() wires the authorization code flow with PKCE through the system browser (WebAuthenticator) back to your app's private-use redirect, keeps the tokens in SecureStorage, refreshes them before they expire (one refresh however many callers race) and signs out by revoking the refresh token. Comes with a ready VocabClient for the network API.</Description>
+    <RootNamespace>Vocab.Sdk.Maui</RootNamespace>
+    <PackageTags>$(PackageTags);maui;mobile</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Vocab.Sdk is consumed as a published package, so this package always records a dependency on a
+         Vocab.Sdk that exists on nuget.org. VocabSdkPackageVersion defaults to "*" (the newest published
+         release, Directory.Build.props); CI sets it to the exact Vocab.Sdk it has just packed and offers that
+         package as a local feed, so the two are built, packed and published in order. Never a ProjectReference:
+         pack would then record a dependency on a version that is never published. -->
+    <PackageReference Include="Vocab.Sdk" Version="$(VocabSdkPackageVersion)" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!-- This library targets plain net8.0/net10.0, not the platform TFMs, so neither building it nor consuming it
+       needs the MAUI workload at pack time: Microsoft.Maui.Essentials ships a net8.0/net10.0 reference assembly,
+       and the MAUI app that references this package binds the same types to its own platform's implementation
+       at run time. Minimum versions (NuGet resolves the lowest that satisfies; an app on a newer MAUI lifts them). -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageReference Include="Microsoft.Maui.Essentials" Version="8.0.100" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.Maui.Essentials" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+
+</Project>

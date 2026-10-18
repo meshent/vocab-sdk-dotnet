@@ -12,10 +12,10 @@
     release versions, and every push to main publishes them (release.yml).
     CI passes the branch as /p:Branch. Never set VersionBuild or VersionRevision by hand to force a version.
 
-    The packages version independently; the numbers carry no meaning beyond ordering. Vocab.Sdk.AspNetCore
-    depends on Vocab.Sdk as a published package (VocabSdkPackageVersion, "*" by default), and the release
-    workflow packs and publishes Vocab.Sdk before Vocab.Sdk.AspNetCore, pointing the dependency at that
-    exact package, so the recorded dependency always names a version that is on nuget.org.
+    The packages version independently; the numbers carry no meaning beyond ordering. Vocab.Sdk.AspNetCore and
+    Vocab.Sdk.Maui depend on Vocab.Sdk as a published package (VocabSdkPackageVersion, "*" by default), and the
+    release workflow packs and publishes Vocab.Sdk before them, pointing the dependency at that exact package, so
+    the recorded dependency always names a version that is on nuget.org.
 
     Check an edit by evaluating, not by building:  dotnet msbuild src/Vocab.Sdk/Vocab.Sdk.csproj -getProperty:Version
   -->
@@ -28,7 +28,7 @@
     <VersionBranch Condition=" '$(Branch)' != '' and '$(Branch)' != 'main' ">$([System.String]::Copy('$(Branch)').Replace('/','-').Replace('\','-').Replace('.','-'))</VersionBranch>
     <VersionPrefix>$(VersionMajor).$(VersionMinor).$(VersionBuild).$(VersionRevision)</VersionPrefix>
     <VersionSuffix>$(VersionBranch)</VersionSuffix>
-    <!-- The Vocab.Sdk version Vocab.Sdk.AspNetCore depends on: the newest published release unless CI names
+    <!-- The Vocab.Sdk version the platform packages depend on: the newest published release unless CI names
          the exact package it packed a moment earlier (see release.yml). -->
     <VocabSdkPackageVersion Condition=" '$(VocabSdkPackageVersion)' == '' ">*</VocabSdkPackageVersion>
   </PropertyGroup>
