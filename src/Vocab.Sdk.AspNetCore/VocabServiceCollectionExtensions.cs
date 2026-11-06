@@ -153,7 +153,8 @@ public static class VocabServiceCollectionExtensions
     /// <see langword="false"/> adds it without touching the default schemes, so an API that already has its own
     /// default keeps it and opts endpoints into vo.cab tokens with
     /// <c>[Authorize(AuthenticationSchemes = VocabDefaults.BearerScheme)]</c>, an authorization policy that names the
-    /// scheme, or a policy scheme that forwards to it.
+    /// scheme, or a policy scheme that forwards to it. When <see cref="VocabDefaults.BearerScheme"/> is the only
+    /// scheme registered, ASP.NET Core uses it as the default anyway, so register your own default scheme too.
     /// </param>
     /// <param name="configure">Further configuration of the JWT bearer handler. The <c>client_id</c> check is applied after it.</param>
     public static IVocabBuilder AddBearer(this IVocabBuilder builder, bool asDefaultScheme, Action<JwtBearerOptions>? configure = null)

@@ -41,11 +41,11 @@ public class BearerBesideDefaultTests : IDisposable
             .On(HttpMethod.Get, "/.well-known/jwks.json", _ => (HttpStatusCode.OK, jwks));
     }
 
-    private string MintVocab(string clientId) =>
+    private string MintVocab(string clientId, string audience = "network.api.vo.cab", string issuer = "https://auth.test") =>
         new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
         {
-            Issuer = "https://auth.test",
-            Audience = "network.api.vo.cab",
+            Issuer = issuer,
+            Audience = audience,
             Claims = new Dictionary<string, object> { [VocabClaims.Subject] = "vocab-user", [VocabClaims.ClientId] = clientId },
             Expires = DateTime.UtcNow.AddMinutes(5),
             SigningCredentials = new SigningCredentials(_vocabKey, SecurityAlgorithms.RsaSha256),
@@ -139,6 +139,8 @@ public class BearerBesideDefaultTests : IDisposable
         Assert.Equal((HttpStatusCode.OK, "vocab-user"), await CallAsync(client, "/api/vocab", MintVocab("app")));
         Assert.Equal(HttpStatusCode.Unauthorized, (await CallAsync(client, "/api/vocab", MintVocab("other-app"))).Status);
         Assert.Equal(HttpStatusCode.Unauthorized, (await CallAsync(client, "/api/vocab", MintOwn())).Status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await CallAsync(client, "/api/vocab", MintVocab("app", audience: "someone-else"))).Status);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await CallAsync(client, "/api/vocab", MintVocab("app", issuer: "https://elsewhere.test"))).Status);
     }
 
     [Fact]
