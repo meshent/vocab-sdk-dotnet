@@ -137,8 +137,27 @@ public static class VocabServiceCollectionExtensions
     /// after <paramref name="configure"/> has run, so neither <see cref="JwtBearerOptions.Events"/> nor
     /// <c>JwtBearerOptions.EventsType</c> can switch it off. The legacy
     /// <see cref="JwtBearerOptions.UseSecurityTokenValidators"/> path is refused at startup.
+    /// To add the scheme beside an authentication scheme your API already defaults to, use
+    /// <see cref="AddBearer(IVocabBuilder, bool, Action{JwtBearerOptions}?)"/> with <c>asDefaultScheme: false</c>.
     /// </remarks>
-    public static IVocabBuilder AddBearer(this IVocabBuilder builder, Action<JwtBearerOptions>? configure = null)
+    public static IVocabBuilder AddBearer(this IVocabBuilder builder, Action<JwtBearerOptions>? configure = null) =>
+        builder.AddBearer(asDefaultScheme: true, configure);
+
+    /// <summary>
+    /// Accept vo.cab access tokens on your own API, as <see cref="AddBearer(IVocabBuilder, Action{JwtBearerOptions}?)"/>
+    /// does, choosing whether <see cref="VocabDefaults.BearerScheme"/> becomes the default scheme.
+    /// </summary>
+    /// <param name="builder">The Vocab registration.</param>
+    /// <param name="asDefaultScheme">
+    /// <see langword="true"/> makes <see cref="VocabDefaults.BearerScheme"/> the default scheme.
+    /// <see langword="false"/> adds it without touching the default schemes, so an API that already has its own
+    /// default keeps it and opts endpoints into vo.cab tokens with
+    /// <c>[Authorize(AuthenticationSchemes = VocabDefaults.BearerScheme)]</c>, an authorization policy that names the
+    /// scheme, or a policy scheme that forwards to it. When <see cref="VocabDefaults.BearerScheme"/> is the only
+    /// scheme registered, ASP.NET Core uses it as the default anyway, so register your own default scheme too.
+    /// </param>
+    /// <param name="configure">Further configuration of the JWT bearer handler. The <c>client_id</c> check is applied after it.</param>
+    public static IVocabBuilder AddBearer(this IVocabBuilder builder, bool asDefaultScheme, Action<JwtBearerOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
         builder.Services.AddHttpContextAccessor();
@@ -146,14 +165,16 @@ public static class VocabServiceCollectionExtensions
         // wraps the token handlers `configure` left behind, so it is in force whatever `configure` did.
         builder.Services.AddSingleton<IConfigureOptions<JwtBearerOptions>, ConfigureJwtBearer>();
         builder.Services.AddSingleton<IPostConfigureOptions<JwtBearerOptions>, RequireMintedForThisApp>();
-        builder.Services.AddAuthentication(VocabDefaults.BearerScheme)
-            .AddJwtBearer(VocabDefaults.BearerScheme, jwt =>
-            {
-                jwt.MapInboundClaims = false;
-                jwt.TokenValidationParameters.NameClaimType = VocabClaims.Subject;
-                jwt.TokenValidationParameters.RoleClaimType = VocabClaims.Roles;
-                configure?.Invoke(jwt);
-            });
+        var authentication = asDefaultScheme
+            ? builder.Services.AddAuthentication(VocabDefaults.BearerScheme)
+            : builder.Services.AddAuthentication();
+        authentication.AddJwtBearer(VocabDefaults.BearerScheme, jwt =>
+        {
+            jwt.MapInboundClaims = false;
+            jwt.TokenValidationParameters.NameClaimType = VocabClaims.Subject;
+            jwt.TokenValidationParameters.RoleClaimType = VocabClaims.Roles;
+            configure?.Invoke(jwt);
+        });
         return builder;
     }
 
