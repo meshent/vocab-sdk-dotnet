@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" Version="8.23.0" />
     <ProjectReference Include="../../src/Vocab.Sdk.AspNetCore/Vocab.Sdk.AspNetCore.csproj" />
   </ItemGroup>
 
